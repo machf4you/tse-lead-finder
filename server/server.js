@@ -19,17 +19,22 @@ let db;
     driver: sqlite3.Database
   });
   
+  // Create tables and perform migrations
   await db.exec(`
-    CREATE TABLE IF NOT EXISTS leads (
+    CREATE TABLE IF NOT EXISTS searches (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT,
-      email TEXT,
-      website TEXT,
       service TEXT,
       location TEXT,
-      date_added DATETIME DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE(website),
-      UNIQUE(email)
+      provider TEXT,
+      leads_count INTEGER,
+      raw_count INTEGER,
+      unique_count INTEGER,
+      qualified_count INTEGER,
+      directories_removed INTEGER,
+      suppliers_removed INTEGER,
+      excluded_domains_removed INTEGER,
+      date_created DATETIME DEFAULT CURRENT_TIMESTAMP,
+      notes TEXT
     );
     CREATE TABLE IF NOT EXISTS excluded_domains (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -40,6 +45,41 @@ let db;
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT UNIQUE NOT NULL,
       date_added DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
+  // Migrate leads table if needed (adding search_id and removing global unique website/email constraint)
+  let migrateLeads = false;
+  try {
+    const cols = await db.all("PRAGMA table_info(leads)");
+    if (cols && cols.length > 0) {
+      const hasSearchId = cols.some(c => c.name === 'search_id');
+      if (!hasSearchId) {
+        migrateLeads = true;
+      }
+    } else {
+      migrateLeads = true;
+    }
+  } catch (e) {
+    migrateLeads = true;
+  }
+
+  if (migrateLeads) {
+    console.log("Migrating leads table: dropping and recreating with search_id relation...");
+    await db.exec("DROP TABLE IF EXISTS leads;");
+  }
+
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS leads (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      search_id INTEGER,
+      name TEXT,
+      email TEXT,
+      website TEXT,
+      service TEXT,
+      location TEXT,
+      date_added DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(search_id) REFERENCES searches(id) ON DELETE CASCADE
     );
   `);
 
@@ -743,16 +783,7 @@ app.post('/api/extract', async (req, res) => {
       location: isWarning ? 'warning' : (location || '')
     };
 
-    if (db && lead.website) {
-      try {
-        await db.run(
-          `INSERT OR IGNORE INTO leads (name, email, website, service, location) VALUES (?, ?, ?, ?, ?)`,
-          [lead.name, lead.email, lead.website, lead.service, lead.location]
-        );
-      } catch (dbErr) {
-        console.error("DB Insert Error:", dbErr.message);
-      }
-    }
+
 
     res.json(lead);
 
@@ -825,6 +856,75 @@ app.delete('/api/exclusions/types/:id', async (req, res) => {
     res.json({ success: true });
   } catch(e) {
     res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/searches', async (req, res) => {
+  if (!db) return res.status(500).json({ error: 'Database not initialized' });
+  const { 
+    service, location, provider, leadsCount, 
+    rawCount, uniqueCount, qualifiedCount, 
+    directoriesRemoved, suppliersRemoved, excludedDomainsRemoved,
+    leads 
+  } = req.body;
+
+  try {
+    const result = await db.run(`
+      INSERT INTO searches (
+        service, location, provider, leads_count,
+        raw_count, unique_count, qualified_count,
+        directories_removed, suppliers_removed, excluded_domains_removed,
+        notes
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [
+      service, location, provider, leadsCount,
+      rawCount, uniqueCount, qualifiedCount,
+      directoriesRemoved, suppliersRemoved, excludedDomainsRemoved,
+      ''
+    ]);
+
+    const searchId = result.lastID;
+
+    if (leads && leads.length > 0) {
+      for (const lead of leads) {
+        await db.run(`
+          INSERT INTO leads (search_id, name, email, website, service, location)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `, [
+          searchId, lead.name, lead.email, lead.website, lead.service, lead.location
+        ]);
+      }
+    }
+
+    res.json({ id: searchId, message: "Search saved successfully" });
+  } catch (err) {
+    console.error("Error saving search:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/searches', async (req, res) => {
+  if (!db) return res.status(500).json({ error: 'Database not initialized' });
+  try {
+    const searches = await db.all("SELECT * FROM searches ORDER BY date_created DESC");
+    res.json(searches);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/searches/:id', async (req, res) => {
+  if (!db) return res.status(500).json({ error: 'Database not initialized' });
+  const { id } = req.params;
+  try {
+    const search = await db.get("SELECT * FROM searches WHERE id = ?", id);
+    if (!search) {
+      return res.status(404).json({ error: "Search not found" });
+    }
+    const leads = await db.all("SELECT * FROM leads WHERE search_id = ?", id);
+    res.json({ ...search, leads });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

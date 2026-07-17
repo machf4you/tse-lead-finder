@@ -282,12 +282,10 @@ function App() {
   const [isExtracting, setIsExtracting] = useState(false);
   const [exportText, setExportText] = useState('');
 
-  const [dbLeads, setDbLeads] = useState([]);
-  const [filterService, setFilterService] = useState('');
-  const [filterLocation, setFilterLocation] = useState('');
+  const [savedSearches, setSavedSearches] = useState([]);
   const [isDbLoading, setIsDbLoading] = useState(false);
-  const [dbExportText, setDbExportText] = useState('');
-  const [dbFeedback, setDbFeedback] = useState('');
+  const [isSavingSearch, setIsSavingSearch] = useState(false);
+  const [saveSuccessMessage, setSaveSuccessMessage] = useState('');
   const [exportFeedback, setExportFeedback] = useState('');
   const [searchSummary, setSearchSummary] = useState(null);
 
@@ -422,56 +420,88 @@ function App() {
     loadExclusions();
   }, []);
 
-  const loadLeads = async () => {
+  const loadSavedSearches = async () => {
     setIsDbLoading(true);
     try {
-      const res = await fetch('/api/leads');
-      if (res.ok) {
-        const data = await res.json();
-        setDbLeads(data.leads || []);
+      const response = await fetch('/api/searches');
+      if (response.ok) {
+        const data = await response.json();
+        setSavedSearches(data || []);
+      } else {
+        alert('Failed to load saved searches');
       }
-    } catch (e) {
-      console.error(e);
+    } catch (err) {
+      console.error(err);
+      alert('Error loading saved searches');
     }
     setIsDbLoading(false);
   };
 
-  const filteredLeads = dbLeads.filter(l => {
-    const sMatch = !filterService || (l.service && l.service.toLowerCase().includes(filterService.toLowerCase()));
-    const lMatch = !filterLocation || (l.location && l.location.toLowerCase().includes(filterLocation.toLowerCase()));
-    return sMatch && lMatch;
-  });
-
-  const handleDownloadCsv = () => {
-    const header = "Name,Email,Website,Service,Location\n";
-    const csv = filteredLeads.map(r => `${r.name || ''},${r.email || ''},${r.website || ''},${r.service || ''},${r.location || ''}`).join('\n');
-    const blob = new Blob([header + csv], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'tse_leads.csv';
-    a.click();
-    window.URL.revokeObjectURL(url);
+  const handleOpenSavedSearch = async (id) => {
+    try {
+      const response = await fetch(`/api/searches/${id}`);
+      if (response.ok) {
+        const data = await response.json();
+        setServiceQuery(data.service || '');
+        setLocationQuery(data.location || '');
+        setResults(data.leads || []);
+        if (data.leads) {
+          setUrls(data.leads.map(l => l.website).join('\n'));
+        }
+        setSearchSummary({
+          provider: data.provider || 'Bing',
+          rawCount: data.raw_count || 0,
+          uniqueCount: data.unique_count || 0,
+          qualifiedCount: data.qualified_count || 0,
+          directoriesRemoved: data.directories_removed || 0,
+          suppliersRemoved: data.suppliers_removed || 0,
+          excludedDomainsRemoved: data.excluded_domains_removed || 0
+        });
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      } else {
+        alert('Failed to open saved search');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Error opening saved search');
+    }
   };
 
-  const handleCopyAll = () => {
-    const textToCopy = filteredLeads.map(r => {
-      const name = r.name !== 'Error' ? r.name : '';
-      return `${name}, ${r.email || ''}, ${r.website || ''}, ${r.service || ''}, ${r.location || ''}`;
-    }).filter(line => line.trim().length > 10).join('\n');
-    setDbExportText(textToCopy);
-    setDbFeedback('Copied to clipboard');
-    navigator.clipboard.writeText(textToCopy).catch(err => console.error('Failed to copy', err));
-  };
+  const handleSaveSearch = async () => {
+    if (results.length === 0) return;
+    setIsSavingSearch(true);
+    setSaveSuccessMessage('');
 
-  const handleCopyDomainsSaved = () => {
-    const textToCopy = Array.from(new Set(filteredLeads.map(r => {
-      if (!r.website || r.name === 'Error') return '';
-      try { return new URL(r.website).origin; } catch(e) { return r.website; }
-    }).filter(w => w))).join('\n');
-    setDbExportText(textToCopy);
-    setDbFeedback('Copied domains');
-    navigator.clipboard.writeText(textToCopy).catch(err => console.error('Failed to copy', err));
+    try {
+      const response = await fetch('/api/searches', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          service: serviceQuery || 'Manual Extraction',
+          location: locationQuery || 'Manual',
+          provider: searchSummary ? searchSummary.provider : 'Manual Input',
+          leadsCount: results.length,
+          rawCount: searchSummary ? searchSummary.rawCount : results.length,
+          uniqueCount: searchSummary ? searchSummary.uniqueCount : results.length,
+          qualifiedCount: searchSummary ? searchSummary.qualifiedCount : results.length,
+          directoriesRemoved: searchSummary ? searchSummary.directoriesRemoved : 0,
+          suppliersRemoved: searchSummary ? searchSummary.suppliersRemoved : 0,
+          excludedDomainsRemoved: searchSummary ? searchSummary.excludedDomainsRemoved : 0,
+          leads: results
+        })
+      });
+
+      if (response.ok) {
+        setSaveSuccessMessage('Search saved successfully!');
+        setTimeout(() => setSaveSuccessMessage(''), 3000);
+      } else {
+        alert('Failed to save search');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Error saving search');
+    }
+    setIsSavingSearch(false);
   };
 
   const runExtractionPipeline = async (urlArray, locQuery = '') => {
@@ -731,19 +761,31 @@ function App() {
                   marginBottom: '1rem'
                 }}>
                   <h3 style={{ margin: 0, color: 'var(--text-main)' }}>Results</h3>
-                  <div style={{ display: 'flex', gap: '0.5rem' }}>
-                    <button 
-                      onClick={handleExport}
-                      style={{ background: '#10b981', color: '#fff', border: 'none', padding: '0.5rem 1rem', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '0.85rem' }}
-                    >
-                      Copy for Audit Tool
-                    </button>
-                    <button 
-                      onClick={handleCopyDomainsResults}
-                      style={{ background: 'var(--accent-color)', color: '#fff', border: 'none', padding: '0.5rem 1rem', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '0.85rem' }}
-                    >
-                      Copy Domains for Audit
-                    </button>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.25rem' }}>
+                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                      <button 
+                        onClick={handleExport}
+                        style={{ background: '#10b981', color: '#fff', border: 'none', padding: '0.5rem 1rem', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '0.85rem' }}
+                      >
+                        Copy for Audit Tool
+                      </button>
+                      <button 
+                        onClick={handleCopyDomainsResults}
+                        style={{ background: 'var(--accent-color)', color: '#fff', border: 'none', padding: '0.5rem 1rem', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '0.85rem' }}
+                      >
+                        Copy Domains for Audit
+                      </button>
+                      <button 
+                        onClick={handleSaveSearch}
+                        disabled={isSavingSearch}
+                        style={{ background: '#3b82f6', color: '#fff', border: 'none', padding: '0.5rem 1rem', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '0.85rem', opacity: isSavingSearch ? 0.7 : 1 }}
+                      >
+                        {isSavingSearch ? 'Saving...' : 'Save Search'}
+                      </button>
+                    </div>
+                    {saveSuccessMessage && (
+                      <span style={{ color: '#10b981', fontSize: '0.8rem', fontWeight: 'bold' }}>{saveSuccessMessage}</span>
+                    )}
                   </div>
                 </div>
 
@@ -769,74 +811,46 @@ function App() {
           </div>
 
           <div className="card" style={{ marginTop: '2rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-              <h2 style={{ margin: 0, color: 'var(--text-main)' }}>Saved Leads</h2>
-              <button className="btn-generate" onClick={loadLeads} disabled={isDbLoading} style={{ width: 'auto', padding: '0.5rem 1rem', marginTop: 0 }}>
-                {isDbLoading ? 'Loading...' : 'View Saved Leads'}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+              <h2 style={{ margin: 0, color: 'var(--text-main)' }}>Saved Searches</h2>
+              <button className="btn-generate" onClick={loadSavedSearches} disabled={isDbLoading} style={{ width: 'auto', padding: '0.5rem 1rem', marginTop: 0 }}>
+                {isDbLoading ? 'Loading...' : 'Load Saved Searches'}
               </button>
             </div>
 
-            {dbLeads.length > 0 && (
-              <>
-                <div style={{ display: 'flex', gap: '1rem', marginBottom: '1.5rem', backgroundColor: 'var(--bg-color)', padding: '1rem', borderRadius: 'var(--radius-md)' }}>
-                  <div style={{ flex: 1 }}>
-                    <label style={{display: 'block', fontSize: '0.9rem', color: 'var(--text-secondary)', marginBottom: '0.25rem'}}>Filter Service</label>
-                    <input type="text" className="input-textarea" placeholder="e.g. plumber" value={filterService} onChange={e => setFilterService(e.target.value)} style={{ padding: '0.5rem' }} />
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <label style={{display: 'block', fontSize: '0.9rem', color: 'var(--text-secondary)', marginBottom: '0.25rem'}}>Filter Location</label>
-                    <input type="text" className="input-textarea" placeholder="e.g. London" value={filterLocation} onChange={e => setFilterLocation(e.target.value)} style={{ padding: '0.5rem' }} />
-                  </div>
-                </div>
-
-                <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem' }}>
-                  <button onClick={handleDownloadCsv} style={{ background: 'var(--border-color)', color: '#fff', border: 'none', padding: '0.5rem 1rem', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>
-                    Download CSV
-                  </button>
-                  <button onClick={handleCopyAll} style={{ background: '#10b981', color: '#fff', border: 'none', padding: '0.5rem 1rem', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>
-                    Copy All
-                  </button>
-                  <button onClick={handleCopyDomainsSaved} style={{ background: 'var(--accent-color)', color: '#fff', border: 'none', padding: '0.5rem 1rem', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>
-                    Copy Domains for Audit
-                  </button>
-                </div>
-
-                {dbExportText && (
-                  <div style={{ marginTop: '1rem', marginBottom: '1rem' }}>
-                    <textarea className="input-textarea" readOnly value={dbExportText} style={{ minHeight: '100px', backgroundColor: 'rgba(15, 23, 42, 0.8)' }}></textarea>
-                    <div style={{ color: '#10b981', fontSize: '0.9rem', marginTop: '0.25rem' }}>✓ {dbFeedback || 'Copied to clipboard'}</div>
-                  </div>
-                )}
-
-                <div style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
-                  Showing {filteredLeads.length} of {dbLeads.length} total leads
-                </div>
-
-                <div style={{ maxHeight: '500px', overflowY: 'auto', paddingRight: '0.5rem' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.9rem' }}>
-                    <thead>
-                      <tr style={{ borderBottom: '2px solid var(--border-color)' }}>
-                        <th style={{ padding: '0.75rem' }}>Name</th>
-                        <th style={{ padding: '0.75rem' }}>Email</th>
-                        <th style={{ padding: '0.75rem' }}>Website</th>
-                        <th style={{ padding: '0.75rem' }}>Service</th>
-                        <th style={{ padding: '0.75rem' }}>Location</th>
+            {savedSearches.length > 0 && (
+              <div style={{ maxHeight: '500px', overflowY: 'auto', paddingRight: '0.5rem' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.9rem' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '2px solid var(--border-color)', color: 'var(--text-secondary)' }}>
+                      <th style={{ padding: '0.75rem' }}>Service</th>
+                      <th style={{ padding: '0.75rem' }}>Location</th>
+                      <th style={{ padding: '0.75rem' }}>Search Date</th>
+                      <th style={{ padding: '0.75rem' }}>Number of Leads</th>
+                      <th style={{ padding: '0.75rem', textAlign: 'right' }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {savedSearches.map((s, i) => (
+                      <tr key={i} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                        <td style={{ padding: '0.75rem', fontWeight: 'bold' }}>{s.service}</td>
+                        <td style={{ padding: '0.75rem' }}>{s.location}</td>
+                        <td style={{ padding: '0.75rem' }}>{new Date(s.date_created).toLocaleString()}</td>
+                        <td style={{ padding: '0.75rem' }}>{s.leads_count}</td>
+                        <td style={{ padding: '0.75rem', textAlign: 'right' }}>
+                          <button 
+                            className="btn-generate"
+                            onClick={() => handleOpenSavedSearch(s.id)}
+                            style={{ width: 'auto', padding: '0.25rem 0.75rem', margin: 0, fontSize: '0.8rem' }}
+                          >
+                            Open
+                          </button>
+                        </td>
                       </tr>
-                    </thead>
-                    <tbody>
-                      {filteredLeads.map((r, i) => (
-                        <tr key={i} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                          <td style={{ padding: '0.75rem' }}>{r.name}</td>
-                          <td style={{ padding: '0.75rem' }}>{r.email}</td>
-                          <td style={{ padding: '0.75rem' }}><a href={r.website} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent-color)' }}>{r.website}</a></td>
-                          <td style={{ padding: '0.75rem' }}>{r.service}</td>
-                          <td style={{ padding: '0.75rem' }}>{r.location}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
         </div>
