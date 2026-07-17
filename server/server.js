@@ -115,6 +115,29 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'TSE Lead Finder Backend is running' });
 });
 
+// Version endpoint
+app.get('/api/version', (req, res) => {
+  const fs = require('fs');
+  const path = require('path');
+  const versionPath = path.join(__dirname, '..', 'version.json');
+  if (fs.existsSync(versionPath)) {
+    try {
+      const data = JSON.parse(fs.readFileSync(versionPath, 'utf8'));
+      return res.json(data);
+    } catch (e) {
+      return res.status(500).json({ error: 'Failed to read version file' });
+    }
+  }
+  res.json({
+    id: 'lead-finder',
+    name: 'TSE Lead Finder',
+    commit_hash: 'dev',
+    branch: 'master',
+    build_time: new Date().toISOString(),
+    version_tag: null
+  });
+});
+
 app.post('/api/search', async (req, res) => {
   console.log("Search endpoint hit");
   let { service, location } = req.body;
