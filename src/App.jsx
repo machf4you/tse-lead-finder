@@ -68,9 +68,7 @@ function LeadCard({ lead, showDate, onExclude, isEven }) {
     setTimeout(() => setCopied(false), 1500);
   };
 
-  const handleAudit = () => {
-    console.log('Audit clicked for:', lead.website);
-  };
+
 
   const confirmExclude = async () => {
     if (!lead.website || lead.name === 'Error') return;
@@ -280,13 +278,11 @@ function App() {
   const [urls, setUrls] = useState('');
   const [results, setResults] = useState([]);
   const [isExtracting, setIsExtracting] = useState(false);
-  const [exportText, setExportText] = useState('');
 
   const [savedSearches, setSavedSearches] = useState([]);
   const [isDbLoading, setIsDbLoading] = useState(false);
   const [isSavingSearch, setIsSavingSearch] = useState(false);
   const [saveSuccessMessage, setSaveSuccessMessage] = useState('');
-  const [exportFeedback, setExportFeedback] = useState('');
   const [searchSummary, setSearchSummary] = useState(null);
 
   const [activeTab, setActiveTab] = useState('finder');
@@ -416,10 +412,6 @@ function App() {
     }
   };
 
-  useEffect(() => {
-    loadExclusions();
-  }, []);
-
   const loadSavedSearches = async () => {
     setIsDbLoading(true);
     try {
@@ -436,6 +428,11 @@ function App() {
     }
     setIsDbLoading(false);
   };
+
+  useEffect(() => {
+    loadExclusions();
+    loadSavedSearches();
+  }, []);
 
   const handleOpenSavedSearch = async (id) => {
     try {
@@ -493,6 +490,7 @@ function App() {
 
       if (response.ok) {
         setSaveSuccessMessage('Search saved successfully!');
+        loadSavedSearches();
         setTimeout(() => setSaveSuccessMessage(''), 3000);
       } else {
         alert('Failed to save search');
@@ -507,8 +505,6 @@ function App() {
   const runExtractionPipeline = async (urlArray, locQuery = '') => {
     setIsExtracting(true);
     setResults([]);
-    setExportText('');
-    setExportFeedback('');
     const newResults = [];
 
     for (const line of urlArray) {
@@ -547,8 +543,6 @@ function App() {
     // Clear previous search states for a clean workspace
     setResults([]);
     setUrls('');
-    setExportText('');
-    setExportFeedback('');
     setSearchSummary(null);
     
     try {
@@ -580,31 +574,9 @@ function App() {
     setIsSearching(false);
   };
 
-  const handleExtractClick = () => {
-    if (!urls.trim()) return;
-    const lines = urls.split('\n').filter(line => line.trim());
-    runExtractionPipeline(lines, locationQuery);
-  };
 
-  const handleExport = () => {
-    const csv = results.map(r => {
-      const name = r.name !== 'Error' ? r.name : '';
-      return `${name}, ${r.email || ''}, ${r.website}, ${r.service || ''}, ${r.location || ''}`;
-    }).filter(line => line.trim().length > 10).join('\n');
-    setExportText(csv);
-    setExportFeedback('Copied to clipboard');
-    navigator.clipboard.writeText(csv).catch(err => console.error('Failed to copy', err));
-  };
 
-  const handleCopyDomainsResults = () => {
-    const textToCopy = Array.from(new Set(results.map(r => {
-      if (!r.website || r.name === 'Error') return '';
-      try { return new URL(r.website).origin; } catch(e) { return r.website; }
-    }).filter(w => w))).join('\n');
-    setExportText(textToCopy);
-    setExportFeedback('Copied domains');
-    navigator.clipboard.writeText(textToCopy).catch(err => console.error('Failed to copy', err));
-  };
+
 
   return (
     <div className="app-container">
@@ -652,59 +624,30 @@ function App() {
 
       {activeTab === 'finder' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '2rem', alignItems: 'stretch' }}>
-            {/* Search Mode Card */}
-            <div className="card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', padding: '1.5rem' }}>
-              <div>
-                <h2 style={{ margin: '0 0 1rem 0', color: 'var(--text-main)' }}>Search Mode</h2>
-                <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem' }}>
-                  <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
-                    <label htmlFor="service">Service</label>
-                    <input type="text" id="service" className="input-textarea" placeholder="e.g. plumber" value={serviceQuery} onChange={e => setServiceQuery(e.target.value)} />
-                  </div>
-                  <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
-                    <label htmlFor="location">Location</label>
-                    <input type="text" id="location" className="input-textarea" placeholder="e.g. London" value={locationQuery} onChange={e => setLocationQuery(e.target.value)} />
-                  </div>
+          {/* Search Mode Card */}
+          <div className="card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', padding: '1.5rem' }}>
+            <div>
+              <h2 style={{ margin: '0 0 1rem 0', color: 'var(--text-main)' }}>Search Mode</h2>
+              <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem' }}>
+                <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
+                  <label htmlFor="service">Service</label>
+                  <input type="text" id="service" className="input-textarea" placeholder="e.g. plumber" value={serviceQuery} onChange={e => setServiceQuery(e.target.value)} />
                 </div>
-                {searchError && <div style={{ color: '#ef4444', marginBottom: '1rem', fontSize: '0.9rem', fontWeight: 'bold' }}>{searchError}</div>}
-              </div>
-              <button 
-                className="btn-generate" 
-                onClick={handleSearch}
-                disabled={isSearching || isExtracting}
-                style={{ marginTop: '1.5rem' }}
-              >
-                {isSearching ? 'Loading...' : 'Find Websites'}
-              </button>
-            </div>
-
-            {/* URL Input Mode Card */}
-            <div className="card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', padding: '1.5rem' }}>
-              <div>
-                <h2 style={{ margin: '0 0 1rem 0', color: 'var(--text-main)' }}>URL Input Mode</h2>
-                <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label htmlFor="urls">Paste Website URLs (One per line)</label>
-                  <textarea
-                    id="urls"
-                    className="input-textarea"
-                    placeholder="https://example.com&#10;https://test.com"
-                    value={urls}
-                    onChange={(e) => setUrls(e.target.value)}
-                    style={{ minHeight: '80px', height: '80px', resize: 'none' }}
-                  ></textarea>
+                <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
+                  <label htmlFor="location">Location</label>
+                  <input type="text" id="location" className="input-textarea" placeholder="e.g. London" value={locationQuery} onChange={e => setLocationQuery(e.target.value)} />
                 </div>
               </div>
-              
-              <button 
-                className="btn-generate" 
-                onClick={handleExtractClick}
-                disabled={isExtracting || isSearching}
-                style={{ marginTop: '1.5rem' }}
-              >
-                {isExtracting ? 'Extracting...' : 'Extract Contacts'}
-              </button>
+              {searchError && <div style={{ color: '#ef4444', marginBottom: '1rem', fontSize: '0.9rem', fontWeight: 'bold' }}>{searchError}</div>}
             </div>
+            <button 
+              className="btn-generate" 
+              onClick={handleSearch}
+              disabled={isSearching || isExtracting}
+              style={{ marginTop: '1.5rem' }}
+            >
+              {isSearching ? 'Loading...' : 'Find Websites'}
+            </button>
           </div>
 
           <div className="card">
@@ -764,18 +707,6 @@ function App() {
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.25rem' }}>
                     <div style={{ display: 'flex', gap: '0.5rem' }}>
                       <button 
-                        onClick={handleExport}
-                        style={{ background: '#10b981', color: '#fff', border: 'none', padding: '0.5rem 1rem', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '0.85rem' }}
-                      >
-                        Copy for Audit Tool
-                      </button>
-                      <button 
-                        onClick={handleCopyDomainsResults}
-                        style={{ background: 'var(--accent-color)', color: '#fff', border: 'none', padding: '0.5rem 1rem', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '0.85rem' }}
-                      >
-                        Copy Domains for Audit
-                      </button>
-                      <button 
                         onClick={handleSaveSearch}
                         disabled={isSavingSearch}
                         style={{ background: '#3b82f6', color: '#fff', border: 'none', padding: '0.5rem 1rem', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '0.85rem', opacity: isSavingSearch ? 0.7 : 1 }}
@@ -789,17 +720,7 @@ function App() {
                   </div>
                 </div>
 
-                {exportText && (
-                  <div style={{ marginTop: '1rem', marginBottom: '1rem' }}>
-                    <textarea
-                      className="input-textarea"
-                      readOnly
-                      value={exportText}
-                      style={{ minHeight: '100px', backgroundColor: 'rgba(15, 23, 42, 0.8)' }}
-                    ></textarea>
-                    <div style={{ color: '#10b981', fontSize: '0.9rem', marginTop: '0.25rem' }}>✓ {exportFeedback || 'Copied to clipboard'}</div>
-                  </div>
-                )}
+
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', marginTop: '1.5rem' }}>
                   {results.map((r, i) => (
