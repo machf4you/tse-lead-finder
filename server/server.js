@@ -5,6 +5,7 @@ const cheerio = require('cheerio');
 const sqlite3 = require('sqlite3').verbose();
 const { open } = require('sqlite');
 
+// Build trigger: copy server and dist physically
 // Clean .env file on startup if it contains \r
 const fs = require('fs');
 const path = require('path');
