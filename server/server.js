@@ -1178,6 +1178,16 @@ app.get('/api/leads', async (req, res) => {
   }
 });
 
+app.get('/api/debug-caddyfile', (req, res) => {
+  const fs = require('fs');
+  try {
+    const content = fs.readFileSync('/etc/caddy/Caddyfile', 'utf8');
+    res.send(`<pre>${content}</pre>`);
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get('/api/debug-local-curl', (req, res) => {
   const { exec } = require('child_process');
   exec('curl -I http://localhost:3002/assets/index-ia2eY_Il.js', (err, stdout, stderr) => {
