@@ -702,10 +702,14 @@ app.post('/api/search', async (req, res) => {
         }
       }
 
+      console.log(`[DEBUG] SEARCH_PROVIDER value: ${JSON.stringify(SEARCH_PROVIDER)}`);
+      console.log(`[DEBUG] process.env.SEARCH_PROVIDER value: ${JSON.stringify(process.env.SEARCH_PROVIDER)}`);
       if (SEARCH_PROVIDER === 'dataforseo') {
+        console.log(`[DEBUG] Entering DataForSEO branch`);
         const rawUrls = await fetchDataForSeoRawUrls(service, location);
         allRawUrls.push(...rawUrls);
       } else {
+        console.log(`[DEBUG] Entering Bing branch`);
         for (let queryIndex = 0; queryIndex < queries.length; queryIndex++) {
            const rawUrls = await fetchRawUrls(queries[queryIndex], queryIndex);
            allRawUrls.push(...rawUrls);
