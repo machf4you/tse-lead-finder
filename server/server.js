@@ -1185,6 +1185,23 @@ app.get('/api/debug-find-paths', (req, res) => {
   });
 });
 
+app.get('/api/debug-permissions', (req, res) => {
+  const fs = require('fs');
+  const path = require('path');
+  const targetFile = path.join(__dirname, '../../dist/assets/index-ia2eY_Il.js');
+  const targetDir = path.join(__dirname, '../../dist');
+  let results = {};
+  try {
+    results.targetExists = fs.existsSync(targetFile);
+    results.targetStat = fs.statSync(targetFile);
+    results.targetLstat = fs.lstatSync(targetFile);
+    results.dirLstat = fs.lstatSync(targetDir);
+  } catch(e) {
+    results.error = e.message;
+  }
+  res.json(results);
+});
+
 app.get('/api/debug-nginx', (req, res) => {
   const fs = require('fs');
   const path = require('path');
