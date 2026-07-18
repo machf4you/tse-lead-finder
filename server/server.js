@@ -1133,6 +1133,16 @@ app.get('/api/leads', async (req, res) => {
   }
 });
 
+app.get('/api/debug-pm2-logs', (req, res) => {
+  const { exec } = require('child_process');
+  exec('pm2 logs tse-lead-finder-api --lines 100 --raw --nopretty', (err, stdout, stderr) => {
+    if (err) {
+      return res.status(500).json({ error: err.message, stderr });
+    }
+    res.send(`<pre>${stdout}</pre>`);
+  });
+});
+
 app.listen(port, (err) => {
   if (err) {
     console.error(`Failed to start server:`, err.message || err);
