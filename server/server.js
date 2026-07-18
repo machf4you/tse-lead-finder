@@ -1155,6 +1155,23 @@ app.get('/api/leads', async (req, res) => {
   }
 });
 
+app.get('/api/debug-nginx', (req, res) => {
+  const fs = require('fs');
+  const path = require('path');
+  const parentDir = path.join(__dirname, '../..');
+  let list = [];
+  try {
+    list = fs.readdirSync(parentDir).map(file => {
+      const full = path.join(parentDir, file);
+      const isDir = fs.statSync(full).isDirectory();
+      return { file, isDir };
+    });
+  } catch(e) {
+    return res.status(500).json({ error: e.message });
+  }
+  res.json({ parentDir, list });
+});
+
 app.listen(port, (err) => {
   if (err) {
     console.error(`Failed to start server:`, err.message || err);
