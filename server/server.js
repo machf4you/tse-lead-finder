@@ -4,6 +4,24 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 const sqlite3 = require('sqlite3').verbose();
 const { open } = require('sqlite');
+
+// Clean .env file on startup if it contains \r
+const fs = require('fs');
+const path = require('path');
+try {
+  const envPath = path.join(__dirname, '.env');
+  if (fs.existsSync(envPath)) {
+    const content = fs.readFileSync(envPath, 'utf8');
+    if (content.includes('\r')) {
+      console.log("Cleaning carriage returns from .env file...");
+      const cleaned = content.replace(/\r/g, '');
+      fs.writeFileSync(envPath, cleaned, 'utf8');
+    }
+  }
+} catch (e) {
+  console.error("Failed to clean .env file:", e.message);
+}
+
 require('dotenv').config();
 
 const app = express();
@@ -352,7 +370,7 @@ app.post('/api/search', async (req, res) => {
   location = location.trim();
   location = location.charAt(0).toUpperCase() + location.slice(1);
   
-  const SEARCH_PROVIDER = process.env.SEARCH_PROVIDER || 'bing';
+  const SEARCH_PROVIDER = (process.env.SEARCH_PROVIDER || 'bing').trim().toLowerCase();
   const cleanLoc = location.trim();
   
   const queries = [
