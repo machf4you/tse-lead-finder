@@ -22,6 +22,29 @@ try {
   console.error("Failed to clean .env file:", e.message);
 }
 
+// Ensure parent dist is a symlink to current/dist so Nginx serves the active release
+try {
+  const parentDist = path.join(__dirname, '../../dist');
+  let isSymlink = false;
+  try {
+    const lstat = fs.lstatSync(parentDist);
+    isSymlink = lstat.isSymbolicLink();
+  } catch(e) {
+    // If it doesn't exist, we will create it
+  }
+
+  if (!isSymlink) {
+    console.log("Parent dist is not a symlink. Replacing with symlink to current/dist...");
+    if (fs.existsSync(parentDist)) {
+      fs.rmSync(parentDist, { recursive: true, force: true });
+    }
+    fs.symlinkSync('current/dist', parentDist);
+    console.log("Successfully created symlink: parent dist -> current/dist");
+  }
+} catch (e) {
+  console.error("Failed to symlink parent dist:", e.message);
+}
+
 require('dotenv').config();
 
 const app = express();
