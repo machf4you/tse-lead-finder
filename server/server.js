@@ -1178,6 +1178,13 @@ app.get('/api/leads', async (req, res) => {
   }
 });
 
+app.get('/api/debug-local-curl', (req, res) => {
+  const { exec } = require('child_process');
+  exec('curl -I http://localhost:3002/assets/index-ia2eY_Il.js', (err, stdout, stderr) => {
+    res.json({ stdout, stderr });
+  });
+});
+
 app.get('/api/debug-find-paths', (req, res) => {
   const { exec } = require('child_process');
   exec('find /var/www -name "*index-DmsW_Bsn.js*" 2>/dev/null', (err, stdout, stderr) => {
