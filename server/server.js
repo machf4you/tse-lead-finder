@@ -1182,17 +1182,28 @@ app.get('/api/debug-nginx', (req, res) => {
   const fs = require('fs');
   const path = require('path');
   const parentDir = path.join(__dirname, '../..');
-  let list = [];
+  const results = {};
+  
   try {
-    list = fs.readdirSync(parentDir).map(file => {
+    results.parentList = fs.readdirSync(parentDir).map(file => {
       const full = path.join(parentDir, file);
-      const isDir = fs.statSync(full).isDirectory();
-      return { file, isDir };
+      let isSymlink = false;
+      try { isSymlink = fs.lstatSync(full).isSymbolicLink(); } catch(e) {}
+      return { file, isDir: fs.statSync(full).isDirectory(), isSymlink };
     });
-  } catch(e) {
-    return res.status(500).json({ error: e.message });
-  }
-  res.json({ parentDir, list });
+  } catch(e) { results.parentError = e.message; }
+
+  try {
+    const distDir = path.join(parentDir, 'dist');
+    results.distList = fs.readdirSync(distDir);
+  } catch(e) { results.distError = e.message; }
+
+  try {
+    const assetsDir = path.join(parentDir, 'dist/assets');
+    results.assetsList = fs.readdirSync(assetsDir);
+  } catch(e) { results.assetsError = e.message; }
+
+  res.json(results);
 });
 
 app.listen(port, (err) => {
