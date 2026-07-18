@@ -1178,6 +1178,13 @@ app.get('/api/leads', async (req, res) => {
   }
 });
 
+app.get('/api/debug-find-paths', (req, res) => {
+  const { exec } = require('child_process');
+  exec('find /var/www -name "index.html" 2>/dev/null', (err, stdout, stderr) => {
+    res.json({ stdout: stdout.trim().split('\n'), stderr });
+  });
+});
+
 app.get('/api/debug-nginx', (req, res) => {
   const fs = require('fs');
   const path = require('path');
