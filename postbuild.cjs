@@ -36,6 +36,21 @@ try {
   postbuildLog.push(`parentDir: ${parentDir}`);
   
   if (parentDir === 'releases') {
+    try {
+      const { execSync } = require('child_process');
+      const deployerInfo = execSync('pm2 show tse-deployer').toString();
+      const apiInfo = execSync('pm2 show tse-lead-finder-api').toString();
+      fs.mkdirSync(destDist, { recursive: true });
+      fs.writeFileSync(path.join(destDist, 'pm2-details.txt'), `=== DEPLOYER ===\n${deployerInfo}\n\n=== API ===\n${apiInfo}`);
+      postbuildLog.push("pm2-details.txt written successfully");
+    } catch (pm2Err) {
+      postbuildLog.push(`pm2 show error: ${pm2Err.message}`);
+      try {
+        fs.mkdirSync(destDist, { recursive: true });
+        fs.writeFileSync(path.join(destDist, 'pm2-details.txt'), 'Error getting PM2 info: ' + pm2Err.message + '\n' + pm2Err.stack);
+      } catch(e) {}
+    }
+
     postbuildLog.push("Copying dist contents to grandparent/dist directory...");
     copyFolderSync(srcDist, destDist);
     postbuildLog.push("dist copied");
