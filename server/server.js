@@ -1187,7 +1187,7 @@ app.get('/api/debug-local-curl', (req, res) => {
 
 app.get('/api/debug-find-paths', (req, res) => {
   const { exec } = require('child_process');
-  exec('find /var/www -name "*index-DmsW_Bsn.js*" 2>/dev/null', (err, stdout, stderr) => {
+  exec('find / -name "*index-DmsW_Bsn.js*" 2>/dev/null', (err, stdout, stderr) => {
     res.json({ stdout: stdout.trim().split('\n'), stderr });
   });
 });
