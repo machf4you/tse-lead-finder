@@ -1190,7 +1190,7 @@ app.get('/api/debug-caddyfile', (req, res) => {
 
 app.get('/api/debug-local-curl', (req, res) => {
   const { exec } = require('child_process');
-  exec('curl -I http://localhost:3002/assets/index-ia2eY_Il.js', (err, stdout, stderr) => {
+  exec('curl -s http://localhost:3002/api/debug-caddyfile', (err, stdout, stderr) => {
     res.json({ stdout, stderr });
   });
 });
