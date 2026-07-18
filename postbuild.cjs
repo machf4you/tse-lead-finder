@@ -26,31 +26,35 @@ function copyFolderSync(from, to) {
   });
 }
 
+const postbuildLog = [];
+postbuildLog.push(`Postbuild started at ${new Date().toISOString()}`);
+postbuildLog.push(`__dirname: ${__dirname}`);
+postbuildLog.push(`rootDir: ${rootDir}`);
+
 try {
   const parentDir = path.basename(path.join(__dirname, '..'));
+  postbuildLog.push(`parentDir: ${parentDir}`);
+  
   if (parentDir === 'releases') {
-    console.log("Copying dist contents to grandparent/dist directory...");
+    postbuildLog.push("Copying dist contents to grandparent/dist directory...");
     copyFolderSync(srcDist, destDist);
+    postbuildLog.push("dist copied");
     
-    console.log("Copying server contents to grandparent/server directory...");
+    postbuildLog.push("Copying server contents to grandparent/server directory...");
     copyFolderSync(srcServer, destServer);
+    postbuildLog.push("server copied");
 
-    console.log("Copying version.json to grandparent directory...");
-    const srcVersion = path.join(__dirname, 'version.json');
-    if (fs.existsSync(srcVersion)) {
-      fs.copyFileSync(srcVersion, path.join(rootDir, 'version.json'));
-    }
-
-    console.log("Copying package files to grandparent directory...");
+    postbuildLog.push("Copying package files to grandparent directory...");
     const packageFiles = ['package.json', 'package-lock.json'];
     packageFiles.forEach(file => {
       const srcFile = path.join(__dirname, file);
       if (fs.existsSync(srcFile)) {
         fs.copyFileSync(srcFile, path.join(rootDir, file));
+        postbuildLog.push(`copied ${file}`);
       }
     });
 
-    console.log("Copying node_modules to grandparent directory...");
+    postbuildLog.push("Copying node_modules to grandparent directory...");
     const srcNodeModules = path.join(__dirname, 'node_modules');
     const destNodeModules = path.join(rootDir, 'node_modules');
     if (fs.existsSync(srcNodeModules)) {
@@ -58,7 +62,20 @@ try {
         fs.rmSync(destNodeModules, { recursive: true, force: true });
       }
       copyFolderSync(srcNodeModules, destNodeModules);
+      postbuildLog.push("node_modules copied");
     }
+
+    // Write version.json containing the log
+    const srcVersion = path.join(__dirname, 'version.json');
+    let versionData = {};
+    if (fs.existsSync(srcVersion)) {
+      try {
+        versionData = JSON.parse(fs.readFileSync(srcVersion, 'utf8'));
+      } catch (e) {}
+    }
+    versionData.postbuild_log = postbuildLog;
+    fs.writeFileSync(path.join(rootDir, 'version.json'), JSON.stringify(versionData, null, 2));
+    postbuildLog.push("version.json written to rootDir");
 
     // Write and spawn the detached PM2 process manager
     const nodePath = process.execPath;
@@ -96,16 +113,18 @@ setTimeout(() => {
 }, 5000);
 `, 'utf8');
 
-    console.log("Spawning detached PM2 migrator...");
     const child = spawn(nodePath, [scriptPath], {
       detached: true,
       stdio: 'ignore'
     });
     child.unref();
-    console.log("Detached PM2 migrator spawned successfully.");
   } else {
-    console.log("Not in releases folder, skipping copy.");
+    postbuildLog.push("Not in releases folder, skipping copy.");
+    fs.writeFileSync(path.join(rootDir, 'version.json'), JSON.stringify({ postbuild_log: postbuildLog }, null, 2));
   }
 } catch (e) {
-  console.error("Failed to copy built files:", e.message);
+  postbuildLog.push(`Error: ${e.message}`);
+  try {
+    fs.writeFileSync(path.join(rootDir, 'version.json'), JSON.stringify({ postbuild_log: postbuildLog }, null, 2));
+  } catch (inner) {}
 }
