@@ -40,6 +40,14 @@ try {
       fs.copyFileSync(srcServerJs, targetServerJs);
       console.log("server/server.js copied successfully!");
     }
+
+    console.log("Copying version.json to grandparent directory...");
+    const srcVersion = path.join(__dirname, 'version.json');
+    const targetVersion = path.join(__dirname, '..', '..', 'version.json');
+    if (fs.existsSync(srcVersion)) {
+      fs.copyFileSync(srcVersion, targetVersion);
+      console.log("version.json copied successfully!");
+    }
   } else {
     console.log("Not in releases folder, skipping copy.");
   }
