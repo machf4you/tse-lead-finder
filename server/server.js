@@ -7,7 +7,7 @@ const { open } = require('sqlite');
 require('dotenv').config();
 
 const app = express();
-const port = 3002;
+const port = process.env.PORT || 3002;
 
 app.use(cors());
 app.use(express.json());
@@ -23,6 +23,7 @@ let db;
   await db.exec(`
     CREATE TABLE IF NOT EXISTS searches (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL DEFAULT '',
       service TEXT,
       location TEXT,
       provider TEXT,
@@ -34,7 +35,9 @@ let db;
       suppliers_removed INTEGER,
       excluded_domains_removed INTEGER,
       date_created DATETIME DEFAULT CURRENT_TIMESTAMP,
-      notes TEXT
+      status TEXT DEFAULT 'Completed',
+      notes TEXT,
+      metadata TEXT DEFAULT '{}'
     );
     CREATE TABLE IF NOT EXISTS excluded_domains (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -47,6 +50,30 @@ let db;
       date_added DATETIME DEFAULT CURRENT_TIMESTAMP
     );
   `);
+
+  // Migrate searches table if needed (adding name, status, metadata)
+  try {
+    const sCols = await db.all("PRAGMA table_info(searches)");
+    if (sCols && sCols.length > 0) {
+      const hasName = sCols.some(c => c.name === 'name');
+      const hasStatus = sCols.some(c => c.name === 'status');
+      const hasMetadata = sCols.some(c => c.name === 'metadata');
+      if (!hasName) {
+        console.log("Migrating searches table: adding name column...");
+        await db.exec("ALTER TABLE searches ADD COLUMN name TEXT NOT NULL DEFAULT '';");
+      }
+      if (!hasStatus) {
+        console.log("Migrating searches table: adding status column...");
+        await db.exec("ALTER TABLE searches ADD COLUMN status TEXT DEFAULT 'Completed';");
+      }
+      if (!hasMetadata) {
+        console.log("Migrating searches table: adding metadata column...");
+        await db.exec("ALTER TABLE searches ADD COLUMN metadata TEXT DEFAULT '{}';");
+      }
+    }
+  } catch (e) {
+    console.error("Failed to migrate searches table:", e.message);
+  }
 
   // Migrate leads table if needed (adding search_id and removing global unique website/email constraint)
   let migrateLeads = false;
@@ -138,18 +165,196 @@ app.get('/api/version', (req, res) => {
   });
 });
 
+async function verifyAndExtractLead(url, service, location, dbExcludedTypes) {
+  let targetUrl = url.trim();
+  if (!targetUrl.startsWith('http')) {
+    targetUrl = 'https://' + targetUrl;
+  }
+
+  const serviceLower = service.toLowerCase().trim();
+  const locLower = location.toLowerCase().replace(' uk', '').trim();
+
+  try {
+    const { data } = await axios.get(targetUrl, {
+      timeout: 5000,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-GB,en;q=0.9',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Referer': 'https://www.google.com/',
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache'
+      }
+    });
+
+    const $ = cheerio.load(data);
+    const text = $('body').text().toLowerCase();
+    const title = $('title').text().toLowerCase();
+    const urlLower = targetUrl.toLowerCase();
+
+    // 1. Excluded business type check
+    const matchedExclusion = dbExcludedTypes.find(t => text.includes(t) || title.includes(t));
+    if (matchedExclusion) {
+      console.log(`Rejected:\n${targetUrl}\nStage: verification\nReason: Matched excluded business type keyword "${matchedExclusion}"\n`);
+      return { isSupplier: true };
+    }
+
+    // 2. Business signals check
+    const signals = ['contact', 'about', 'call', 'book', 'clinic', 'practice'];
+    const hasService = serviceLower && text.includes(serviceLower);
+    const hasSignal = signals.some(s => text.includes(s));
+    if (!hasSignal && !hasService) {
+      console.log(`Rejected:\n${targetUrl}\nStage: verification\nReason: missing business action signals\n`);
+      return null;
+    }
+
+    // 3. Geo-targeting region check
+    if (locLower) {
+      const forbiddenRegions = ['dublin', 'ireland', 'scotland', 'wales', 'belfast', 'edinburgh', 'glasgow', 'cardiff', 'australia', 'usa', 'america', 'canada', 'new zealand'];
+      const activeForbidden = forbiddenRegions.filter(f => f !== locLower);
+      if (activeForbidden.some(f => urlLower.includes(f) || title.includes(f))) {
+        console.log(`Rejected:\n${targetUrl}\nStage: verification\nReason: Contains forbidden region in URL or Title\n`);
+        return null;
+      }
+    }
+
+    // 4. Extract email
+    let email = '';
+    $('a[href^="mailto:"]').each((i, el) => {
+      if (!email) {
+        const href = $(el).attr('href');
+        let potentialEmail = href.replace('mailto:', '').split('?')[0].trim();
+        if (isValidEmail(potentialEmail)) email = potentialEmail;
+      }
+    });
+
+    if (!email) {
+      const emailRegex = /([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9_-]{2,})/gi;
+      const matches = text.match(emailRegex);
+      if (matches && matches.length > 0) {
+        const validMatch = matches.find(m => isValidEmail(m));
+        if (validMatch) email = validMatch;
+      }
+    }
+
+    // Check subpages if email not found
+    if (!email) {
+      const subpages = ['/contact', '/contact-us', '/about', '/about-us'];
+      for (const sub of subpages) {
+        try {
+          const base = new URL(targetUrl).origin;
+          const subUrl = base + sub;
+          const subRes = await axios.get(subUrl, {
+            timeout: 4000,
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            }
+          });
+          const $sub = cheerio.load(subRes.data);
+          $sub('a[href^="mailto:"]').each((i, el) => {
+            if (!email) {
+              const href = $sub(el).attr('href');
+              let potentialEmail = href.replace('mailto:', '').split('?')[0].trim();
+              if (isValidEmail(potentialEmail)) email = potentialEmail;
+            }
+          });
+          if (!email) {
+            const subText = $sub('body').text();
+            const emailRegex = /([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9_-]{2,})/gi;
+            const matches = subText.match(emailRegex);
+            if (matches && matches.length > 0) {
+              const validMatch = matches.find(m => isValidEmail(m));
+              if (validMatch) email = validMatch;
+            }
+          }
+        } catch (e) {}
+        if (email) break;
+      }
+    }
+
+    // 5. Clean business name
+    let businessName = title;
+    if (!businessName) businessName = $('h1').first().text().trim();
+    if (businessName.includes('|')) businessName = businessName.split('|')[0].trim();
+    else if (businessName.includes('-')) businessName = businessName.split('-')[0].trim();
+
+    businessName = businessName.replace(/plumbers? in .+/gi, '').trim();
+    businessName = businessName.replace(/plumbing services? .+/gi, '').trim();
+    businessName = businessName.split(' ').filter((item, pos, arr) => {
+        return item && (pos === 0 || item.toLowerCase() !== arr[pos - 1].toLowerCase());
+    }).join(' ').trim();
+
+    if (!businessName || businessName.toLowerCase() === 'unknown') {
+      try {
+        const urlObj = new URL(targetUrl);
+        let hostname = urlObj.hostname.replace(/^www\./i, '');
+        hostname = hostname.replace(/\.(co\.uk|com|org|net|uk|biz|info|ca)$/i, '');
+        let name = hostname.replace(/-/g, ' ');
+        const commonWords = ['plumbing', 'plumbers', 'plumber', 'heating', 'services', 'service', 'electrical', 'electrician', 'boiler', 'repairs', 'repair', 'ltd'];
+        for (const w of commonWords) {
+          name = name.replace(new RegExp(`(${w})`, 'gi'), ' $1 ');
+        }
+        name = name.toLowerCase().replace('inreading', ' in reading ').replace('inlondon', ' in london ').replace('inmanchester', ' in manchester ').replace(/\s+/g, ' ').trim();
+        businessName = name.split(' ').filter(Boolean).join(' ').trim();
+      } catch(e) {
+        businessName = 'Business Lead';
+      }
+    }
+
+    if (businessName && businessName !== 'Business Lead') {
+      businessName = businessName.split(' ').filter(Boolean).map(w => {
+         let lower = w.toLowerCase();
+         if (lower === 'ltd') return 'Ltd';
+         if (['in', 'and', 'the', 'of'].includes(lower)) return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+         if (w.length >= 2 && w.length <= 3 && !['sam', 'bob', 'tom', 'dan', 'jim', 'joe', 'mac', 'ray', 'roy', 'leo'].includes(lower)) return w.toUpperCase();
+         return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+      }).join(' ').trim();
+    }
+
+    return {
+      name: businessName || 'Business Lead',
+      email: email || '',
+      website: targetUrl,
+      service: service || '',
+      location: location || ''
+    };
+
+  } catch (err) {
+    console.log(`Failed to scrape ${targetUrl}, returning baseline warning:`, err.message);
+    try {
+      const urlObj = new URL(targetUrl);
+      let name = urlObj.hostname.replace(/^www\./i, '').replace(/\..+$/, '');
+      name = name.charAt(0).toUpperCase() + name.slice(1);
+      return {
+        name,
+        email: '',
+        website: targetUrl,
+        service: service || '',
+        location: 'warning'
+      };
+    } catch(e) {
+      return {
+        name: 'Business Lead',
+        email: '',
+        website: targetUrl,
+        service: service || '',
+        location: 'warning'
+      };
+    }
+  }
+}
+
 app.post('/api/search', async (req, res) => {
   console.log("Search endpoint hit");
   let { service, location } = req.body;
   if (!service || !location) return res.status(400).json({ error: 'Service and Location required' });
 
-  // Normalize and strictly bind to UK to prevent ambiguous noun searches (e.g. Reading, Bath)
   location = location.trim();
   location = location.charAt(0).toUpperCase() + location.slice(1);
   
   const SEARCH_PROVIDER = process.env.SEARCH_PROVIDER || 'bing';
-  
   const cleanLoc = location.trim();
+  
   const queries = [
     `${service.trim()} in ${cleanLoc}${cleanLoc.toLowerCase().endsWith('uk') ? '' : ' UK'} website`,
     `best ${service.trim()} ${cleanLoc} website`,
@@ -199,7 +404,6 @@ app.post('/api/search', async (req, res) => {
         }
       });
       
-      // Update cookies
       const newCookies = resHeaders['set-cookie'] || [];
       if (newCookies.length > 0) {
         const cookieMap = {};
@@ -357,11 +561,9 @@ app.post('/api/search', async (req, res) => {
   const processUrls = (rawUrls, allowDeep, allowOrg, seenDomains, serviceStr, locationStr, dbExcludedDomains = [], statsObj = { directoriesRemoved: 0, excludedDomainsRemoved: 0 }) => {
     const validUrls = [];
     const blocklistDomains = [
-      // Social & Tech giants
       'youtube.com', 'facebook.com', 'twitter.com', 'instagram.com', 'linkedin.com', 'pinterest.com',
       'wikipedia.org', 'google.com', 'google.co.uk', 'microsoft.com', 'bbc.co.uk', 'bbc.com',
       'sky.com', 'zhihu.com', 'eleconomista.com.mx', 'eleconomista.es', 'translate.google.com',
-      // Directories & Aggregators
       'yell.com', 'yelp.com', 'yelp.co.uk', 'threebestrated.co.uk', 'threebestrated.com', 
       'whatclinic.com', 'dentists.com', 'mydentist.co.uk', 'alldentists.co.uk', 'directory.co.uk',
       'nhs.uk', 'booking.com', 'tripadvisor.co.uk', 'tripadvisor.com'
@@ -393,7 +595,6 @@ app.post('/api/search', async (req, res) => {
       
       const domain = urlObj.hostname.replace(/^www\./, '');
       
-      // Strict domain exact/suffix match filtering (combines hardcoded and user-configured database exclusions)
       const isStaticBlocklisted = blocklistDomains.some(d => domain === d || domain.endsWith('.' + d));
       const isUserBlocklisted = dbExcludedDomains.some(d => domain === d || domain.endsWith('.' + d));
       if (isStaticBlocklisted) {
@@ -407,7 +608,6 @@ app.post('/api/search', async (req, res) => {
         continue;
       }
 
-      // Strict TLD filtering to block foreign sites (.fr, .it, .es, etc)
       const allowedTlds = ['.uk', '.com', '.net', '.org', '.biz', '.info', '.co', '.io'];
       const hasAllowedTld = allowedTlds.some(tld => domain.toLowerCase().endsWith(tld));
       if (!hasAllowedTld) {
@@ -429,7 +629,6 @@ app.post('/api/search', async (req, res) => {
       }
     }
 
-    // Prioritise: .co.uk domains, business homepages, and URLs containing service/location words
     validUrls.sort((a, b) => {
       let scoreA = 0; let scoreB = 0;
       if (a.includes('.co.uk')) scoreA += 10;
@@ -450,7 +649,7 @@ app.post('/api/search', async (req, res) => {
       try {
         const pathLenA = new URL(a).pathname.split('/').filter(p => p.length > 0).length;
         const pathLenB = new URL(b).pathname.split('/').filter(p => p.length > 0).length;
-        scoreA -= pathLenA * 2; // penalize deeper paths
+        scoreA -= pathLenA * 2;
         scoreB -= pathLenB * 2;
       } catch(e) {}
       
@@ -460,151 +659,124 @@ app.post('/api/search', async (req, res) => {
     return validUrls;
   };
 
+  // Create search name and initial database record
+  const searchName = `${service.trim()} - ${location.trim()}`;
+  let searchId;
   try {
-    const globalSeenDomains = new Set();
-    const allRawUrls = [];
+    const result = await db.run(`
+      INSERT INTO searches (
+        name, service, location, status, provider,
+        leads_count, raw_count, unique_count, qualified_count,
+        directories_removed, suppliers_removed, excluded_domains_removed,
+        notes, metadata
+      ) VALUES (?, ?, ?, ?, ?, 0, 0, 0, 0, 0, 0, 0, '', '{}')
+    `, [
+      searchName, service.trim(), location.trim(), 'Searching',
+      SEARCH_PROVIDER === 'dataforseo' ? 'Google (DataForSEO)' : 'Bing'
+    ]);
+    searchId = result.lastID;
+  } catch (err) {
+    console.error("Failed to insert initial search record:", err.message);
+    return res.status(500).json({ error: 'Failed to initialize search record' });
+  }
 
-    // Fetch user exclusions from database
-    let dbExcludedDomains = [];
-    let dbExcludedTypes = [];
-    const statsObj = { directoriesRemoved: 0, excludedDomainsRemoved: 0 };
-    let suppliersRemoved = 0;
-    
-    if (db) {
-      try {
-        dbExcludedDomains = (await db.all("SELECT domain FROM excluded_domains")).map(r => r.domain.toLowerCase());
-        dbExcludedTypes = (await db.all("SELECT name FROM excluded_business_types")).map(r => r.name.toLowerCase());
-      } catch (dbErr) {
-        console.error("Failed to fetch exclusions from database:", dbErr.message);
+  // Respond immediately to start polling
+  res.json({ id: searchId, name: searchName, status: 'Searching' });
+
+  // Execute background pipeline asynchronously
+  (async () => {
+    try {
+      const globalSeenDomains = new Set();
+      const allRawUrls = [];
+      const statsObj = { directoriesRemoved: 0, excludedDomainsRemoved: 0 };
+      let suppliersRemoved = 0;
+      
+      let dbExcludedDomains = [];
+      let dbExcludedTypes = [];
+      if (db) {
+        try {
+          dbExcludedDomains = (await db.all("SELECT domain FROM excluded_domains")).map(r => r.domain.toLowerCase());
+          dbExcludedTypes = (await db.all("SELECT name FROM excluded_business_types")).map(r => r.name.toLowerCase());
+        } catch (dbErr) {
+          console.error("Failed to fetch exclusions from database:", dbErr.message);
+        }
       }
-    }
 
-    if (SEARCH_PROVIDER === 'dataforseo') {
-      const rawUrls = await fetchDataForSeoRawUrls(service, location);
-      allRawUrls.push(...rawUrls);
-    } else {
-      for (let queryIndex = 0; queryIndex < queries.length; queryIndex++) {
-         console.log(`\nSEARCH QUERY:\n${queries[queryIndex]}\n`);
-         const rawUrls = await fetchRawUrls(queries[queryIndex], queryIndex);
-         allRawUrls.push(...rawUrls);
+      if (SEARCH_PROVIDER === 'dataforseo') {
+        const rawUrls = await fetchDataForSeoRawUrls(service, location);
+        allRawUrls.push(...rawUrls);
+      } else {
+        for (let queryIndex = 0; queryIndex < queries.length; queryIndex++) {
+           const rawUrls = await fetchRawUrls(queries[queryIndex], queryIndex);
+           allRawUrls.push(...rawUrls);
+        }
       }
-    }
 
-    console.log("RAW RESULTS:");
-    allRawUrls.forEach(u => console.log(`[${u}]`));
-    console.log("");
+      let processed = processUrls(allRawUrls, true, false, globalSeenDomains, service, location, dbExcludedDomains, statsObj);
+      
+      // Update intermediate counts in searches table
+      await db.run(`
+        UPDATE searches SET 
+          raw_count = ?,
+          unique_count = ?,
+          directories_removed = ?,
+          excluded_domains_removed = ?
+        WHERE id = ?
+      `, [allRawUrls.length, processed.length, statsObj.directoriesRemoved, statsObj.excludedDomainsRemoved, searchId]);
 
-    let processed = processUrls(allRawUrls, true, false, globalSeenDomains, service, location, dbExcludedDomains, statsObj);
-    
-    console.log("FILTERED RESULTS:");
-    processed.forEach(u => console.log(`[${u}]`));
-    console.log("");
+      // Verify business signals, scrape subpages, extract email
+      const urlsToVerify = processed.slice(0, 50);
+      let qualifiedCount = 0;
 
-    // Verify business signals and enforce Geo-targeting
-    const urlsToVerify = processed.slice(0, 50);
-    const checkPromises = urlsToVerify.map(async (url) => {
-       try {
-         const { data } = await axios.get(url, { 
-           timeout: 4000, 
-           headers: {
-             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-             'Accept-Language': 'en-GB,en;q=0.9',
-             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-             'Referer': 'https://www.google.com/',
-             'Cache-Control': 'no-cache',
-             'Pragma': 'no-cache'
-           }
-         });
-          const $ = cheerio.load(data);
-          const text = $('body').text().toLowerCase();
-          const title = $('title').text().toLowerCase();
-          const urlLower = url.toLowerCase();
-          
-          // User-configured business type exclusions check
-           const matchedExclusion = dbExcludedTypes.find(t => text.includes(t) || title.includes(t));
-           if (matchedExclusion) {
-             console.log(`Rejected:\n${url}\nStage: verification\nReason: Matched excluded business type keyword "${matchedExclusion}"\n`);
-             suppliersRemoved++;
-             return null;
-           }
-         
-         const serviceLower = service.toLowerCase().trim();
-         const locLower = location.toLowerCase().replace(' uk', '').trim();
-         
-         // Must contain the service or a business signal
-         const signals = ['contact', 'about', 'call', 'book', 'clinic', 'practice'];
-         const hasService = serviceLower && text.includes(serviceLower);
-         const hasSignal = signals.some(s => text.includes(s));
-         
-         if (!hasSignal) {
-           console.log(`Rejected:\n${url}\nStage: verification\nReason: missing business action signals (contact/about/etc)\n`);
-           return null; 
-         }
-         if (!hasService && !hasSignal) {
-           console.log(`Rejected:\n${url}\nStage: verification\nReason: missing service and business signals\n`);
-           return null;
-         }
-                  if (locLower) {
-            // 1. URL contains location OR page title contains location
-            const locInUrl = urlLower.includes(locLower);
-            const locInTitle = title.includes(locLower);
-            
-            // Loosened filter: Do not reject if location is missing from URL and Title to prefer false positives.
+      for (const url of urlsToVerify) {
+        const lead = await verifyAndExtractLead(url, service, location, dbExcludedTypes);
+        if (lead) {
+          if (lead.isSupplier) {
+            suppliersRemoved++;
+            await db.run("UPDATE searches SET suppliers_removed = ? WHERE id = ?", [suppliersRemoved, searchId]);
+          } else {
+            // Write lead to DB
+            await db.run(`
+              INSERT INTO leads (search_id, name, email, website, service, location)
+              VALUES (?, ?, ?, ?, ?, ?)
+            `, [searchId, lead.name, lead.email, lead.website, lead.service, lead.location]);
 
-            // 2. Reject if result contains another city/country
-           const forbiddenRegions = [
-             'dublin', 'ireland', 'scotland', 'wales', 'belfast', 
-             'edinburgh', 'glasgow', 'cardiff', 'australia', 
-             'usa', 'america', 'canada', 'new zealand'
-           ];
-           const activeForbidden = forbiddenRegions.filter(f => f !== locLower);
-           
-           // If any forbidden region is mentioned prominently, reject
-           if (activeForbidden.some(f => urlLower.includes(f) || title.includes(f))) {
-             console.log(`Rejected:\n${url}\nStage: verification\nReason: Contains forbidden region in URL or Title\n`);
-             return null;
-           }
-
-            // 3. Location confidence filter
-            // Loosened filter: Do not reject if body text is missing location to prefer false positives.
+            qualifiedCount++;
+            await db.run(`
+              UPDATE searches SET 
+                qualified_count = ?,
+                leads_count = ?
+              WHERE id = ?
+            `, [qualifiedCount, qualifiedCount, searchId]);
           }
-         
-          return url;
-       } catch (e) {
-         console.log(`Rejected:\n${url}\nStage: homepage scraping\nReason: HTTP Request failed or timed out: ${e.message}\n`);
-         // Return the URL anyway instead of null.
-         return url;
-       }
-       return null;
-    });
+        }
+      }
 
-    const results = await Promise.all(checkPromises);
-    const finalUrls = [];
-    for (const resUrl of results) {
-       if (resUrl) finalUrls.push(resUrl);
+      // Mark status Completed
+      await db.run("UPDATE searches SET status = 'Completed' WHERE id = ?", [searchId]);
+      console.log(`[BACKGROUND SEARCH] Search ID ${searchId} Completed successfully.`);
+
+    } catch (bgErr) {
+      console.error(`Background search error for ID ${searchId}:`, bgErr.message);
+      try {
+        await db.run("UPDATE searches SET status = 'Completed' WHERE id = ?", [searchId]);
+      } catch (dbErr) {
+        console.error("Failed to set Completed status after error:", dbErr.message);
+      }
     }
+  })();
+});
 
-    console.log(`Stage 3: Verified business signals: ${finalUrls.length}`);
-
-    console.log("\n=== FINAL EXTRACTED URLS ===");
-    console.log(finalUrls);
-
-     res.json({ 
-       urls: finalUrls.slice(0, 20),
-       summary: {
-         provider: SEARCH_PROVIDER === 'dataforseo' ? 'Google (DataForSEO)' : 'Bing',
-         rawCount: allRawUrls.length,
-         uniqueCount: processed.length,
-         qualifiedCount: finalUrls.length,
-         directoriesRemoved: statsObj.directoriesRemoved,
-         suppliersRemoved: suppliersRemoved,
-         excludedDomainsRemoved: statsObj.excludedDomainsRemoved
-       }
-     });
-   } catch (error) {
-     console.error(`Error searching:`, error.message);
-     res.status(500).json({ error: 'Failed to perform search' });
-   }
+app.delete('/api/searches/:id', async (req, res) => {
+  if (!db) return res.status(500).json({ error: 'Database not initialized' });
+  const { id } = req.params;
+  try {
+    await db.run("DELETE FROM leads WHERE search_id = ?", id);
+    await db.run("DELETE FROM searches WHERE id = ?", id);
+    res.json({ success: true, message: "Search deleted successfully" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 function isValidEmail(m) {

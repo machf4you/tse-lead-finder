@@ -434,6 +434,15 @@ function App() {
     loadSavedSearches();
   }, []);
 
+  const [activeSearchId, setActiveSearchId] = useState(null);
+  const [pollingIntervalId, setPollingIntervalId] = useState(null);
+
+  useEffect(() => {
+    return () => {
+      if (pollingIntervalId) clearInterval(pollingIntervalId);
+    };
+  }, [pollingIntervalId]);
+
   const handleOpenSavedSearch = async (id) => {
     try {
       const response = await fetch(`/api/searches/${id}`);
@@ -454,6 +463,46 @@ function App() {
           suppliersRemoved: data.suppliers_removed || 0,
           excludedDomainsRemoved: data.excluded_domains_removed || 0
         });
+        setActiveSearchId(data.id);
+        setActiveTab('finder');
+
+        if (pollingIntervalId) {
+          clearInterval(pollingIntervalId);
+        }
+
+        if (data.status === 'Searching') {
+          setIsSearching(true);
+          const interval = setInterval(async () => {
+            try {
+              const res = await fetch(`/api/searches/${data.id}`);
+              if (res.ok) {
+                const searchData = await res.json();
+                setResults(searchData.leads || []);
+                setSearchSummary({
+                  provider: searchData.provider,
+                  rawCount: searchData.raw_count,
+                  uniqueCount: searchData.unique_count,
+                  qualifiedCount: searchData.qualified_count,
+                  directoriesRemoved: searchData.directories_removed,
+                  suppliersRemoved: searchData.suppliers_removed,
+                  excludedDomainsRemoved: searchData.excluded_domains_removed
+                });
+                
+                if (searchData.status === 'Completed') {
+                  clearInterval(interval);
+                  setIsSearching(false);
+                  loadSavedSearches();
+                }
+              }
+            } catch (e) {
+              clearInterval(interval);
+              setIsSearching(false);
+            }
+          }, 2000);
+          setPollingIntervalId(interval);
+        } else {
+          setIsSearching(false);
+        }
         window.scrollTo({ top: 0, behavior: 'smooth' });
       } else {
         alert('Failed to open saved search');
@@ -464,70 +513,30 @@ function App() {
     }
   };
 
-  const handleSaveSearch = async () => {
-    if (results.length === 0) return;
-    setIsSavingSearch(true);
-    setSaveSuccessMessage('');
-
+  const handleDeleteSearch = async (id) => {
+    if (!confirm('Are you sure you want to delete this search? All associated leads will be deleted.')) return;
     try {
-      const response = await fetch('/api/searches', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          service: serviceQuery || 'Manual Extraction',
-          location: locationQuery || 'Manual',
-          provider: searchSummary ? searchSummary.provider : 'Manual Input',
-          leadsCount: results.length,
-          rawCount: searchSummary ? searchSummary.rawCount : results.length,
-          uniqueCount: searchSummary ? searchSummary.uniqueCount : results.length,
-          qualifiedCount: searchSummary ? searchSummary.qualifiedCount : results.length,
-          directoriesRemoved: searchSummary ? searchSummary.directoriesRemoved : 0,
-          suppliersRemoved: searchSummary ? searchSummary.suppliersRemoved : 0,
-          excludedDomainsRemoved: searchSummary ? searchSummary.excludedDomainsRemoved : 0,
-          leads: results
-        })
+      const response = await fetch(`/api/searches/${id}`, {
+        method: 'DELETE'
       });
-
       if (response.ok) {
-        setSaveSuccessMessage('Search saved successfully!');
         loadSavedSearches();
-        setTimeout(() => setSaveSuccessMessage(''), 3000);
+        if (activeSearchId === id) {
+          setResults([]);
+          setSearchSummary(null);
+          setActiveSearchId(null);
+          if (pollingIntervalId) {
+            clearInterval(pollingIntervalId);
+          }
+          setIsSearching(false);
+        }
       } else {
-        alert('Failed to save search');
+        alert('Failed to delete search');
       }
     } catch (err) {
       console.error(err);
-      alert('Error saving search');
+      alert('Error deleting search');
     }
-    setIsSavingSearch(false);
-  };
-
-  const runExtractionPipeline = async (urlArray, locQuery = '') => {
-    setIsExtracting(true);
-    setResults([]);
-    const newResults = [];
-
-    for (const line of urlArray) {
-      if (!line.trim()) continue;
-      try {
-        const response = await fetch('/api/extract', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url: line, queryLocation: locQuery })
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          newResults.push(data);
-        } else {
-          newResults.push({ name: 'Error', website: line, email: '' });
-        }
-      } catch (err) {
-        newResults.push({ name: 'Error', website: line, email: '' });
-      }
-      setResults([...newResults]);
-    }
-    setIsExtracting(false);
   };
 
   const handleSearch = async () => {
@@ -540,10 +549,14 @@ function App() {
     setSearchError('');
     setIsSearching(true);
     
-    // Clear previous search states for a clean workspace
     setResults([]);
     setUrls('');
     setSearchSummary(null);
+    setActiveSearchId(null);
+
+    if (pollingIntervalId) {
+      clearInterval(pollingIntervalId);
+    }
     
     try {
       const response = await fetch('/api/search', {
@@ -554,24 +567,50 @@ function App() {
 
       if (response.ok) {
         const data = await response.json();
-        if (data.summary) {
-          setSearchSummary(data.summary);
-        }
-        if (data.urls && data.urls.length > 0) {
-          setUrls(data.urls.join('\n'));
-          await runExtractionPipeline(data.urls, locationQuery);
-        } else {
-          setSearchError('No websites found for this query.');
-        }
+        setActiveSearchId(data.id);
+        loadSavedSearches();
+        
+        const interval = setInterval(async () => {
+          try {
+            const res = await fetch(`/api/searches/${data.id}`);
+            if (res.ok) {
+              const searchData = await res.json();
+              setResults(searchData.leads || []);
+              setSearchSummary({
+                provider: searchData.provider,
+                rawCount: searchData.raw_count,
+                uniqueCount: searchData.unique_count,
+                qualifiedCount: searchData.qualified_count,
+                directoriesRemoved: searchData.directories_removed,
+                suppliersRemoved: searchData.suppliers_removed,
+                excludedDomainsRemoved: searchData.excluded_domains_removed
+              });
+              
+              if (searchData.status === 'Completed') {
+                clearInterval(interval);
+                setIsSearching(false);
+                loadSavedSearches();
+              }
+            } else {
+              clearInterval(interval);
+              setIsSearching(false);
+            }
+          } catch (e) {
+            clearInterval(interval);
+            setIsSearching(false);
+          }
+        }, 2000);
+        setPollingIntervalId(interval);
       } else {
         const errorData = await response.json();
         setSearchError(errorData.error || 'Failed to search websites.');
+        setIsSearching(false);
       }
     } catch (err) {
       console.error(err);
       setSearchError('Network error while searching.');
+      setIsSearching(false);
     }
-    setIsSearching(false);
   };
 
 
@@ -602,6 +641,23 @@ function App() {
           }}
         >
           Lead Finder
+        </button>
+        <button 
+          onClick={() => setActiveTab('searches')}
+          style={{
+            background: 'none',
+            border: 'none',
+            color: activeTab === 'searches' ? 'var(--accent-color)' : 'var(--text-secondary)',
+            fontWeight: 'bold',
+            fontSize: '1.1rem',
+            cursor: 'pointer',
+            padding: '0.5rem 1rem',
+            borderBottom: activeTab === 'searches' ? '3px solid var(--accent-color)' : '3px solid transparent',
+            marginBottom: '-0.75rem',
+            transition: 'all 0.2s'
+          }}
+        >
+          Saved Searches
         </button>
         <button 
           onClick={() => setActiveTab('exclusions')}
@@ -704,23 +760,12 @@ function App() {
                   marginBottom: '1rem'
                 }}>
                   <h3 style={{ margin: 0, color: 'var(--text-main)' }}>Results</h3>
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.25rem' }}>
-                    <div style={{ display: 'flex', gap: '0.5rem' }}>
-                      <button 
-                        onClick={handleSaveSearch}
-                        disabled={isSavingSearch}
-                        style={{ background: '#3b82f6', color: '#fff', border: 'none', padding: '0.5rem 1rem', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '0.85rem', opacity: isSavingSearch ? 0.7 : 1 }}
-                      >
-                        {isSavingSearch ? 'Saving...' : 'Save Search'}
-                      </button>
-                    </div>
-                    {saveSuccessMessage && (
-                      <span style={{ color: '#10b981', fontSize: '0.8rem', fontWeight: 'bold' }}>{saveSuccessMessage}</span>
-                    )}
-                  </div>
+                  {activeSearchId && (
+                    <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                      Search ID: <strong style={{ fontFamily: 'monospace' }}>#{activeSearchId}</strong>
+                    </span>
+                  )}
                 </div>
-
-
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', marginTop: '1.5rem' }}>
                   {results.map((r, i) => (
@@ -733,31 +778,51 @@ function App() {
 
           <div className="card" style={{ marginTop: '2rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-              <h2 style={{ margin: 0, color: 'var(--text-main)' }}>Saved Searches</h2>
-              <button className="btn-generate" onClick={loadSavedSearches} disabled={isDbLoading} style={{ width: 'auto', padding: '0.5rem 1rem', marginTop: 0 }}>
-                {isDbLoading ? 'Loading...' : 'Load Saved Searches'}
+              <h2 style={{ margin: 0, color: 'var(--text-main)' }}>Recent Searches</h2>
+              <button 
+                className="btn-generate" 
+                onClick={() => setActiveTab('searches')} 
+                style={{ width: 'auto', padding: '0.5rem 1rem', marginTop: 0 }}
+              >
+                View All Searches
               </button>
             </div>
 
-            {savedSearches.length > 0 && (
-              <div style={{ maxHeight: '500px', overflowY: 'auto', paddingRight: '0.5rem' }}>
+            {savedSearches.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-secondary)' }}>
+                No recent searches found. Run a search to get started.
+              </div>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.9rem' }}>
                   <thead>
                     <tr style={{ borderBottom: '2px solid var(--border-color)', color: 'var(--text-secondary)' }}>
-                      <th style={{ padding: '0.75rem' }}>Service</th>
-                      <th style={{ padding: '0.75rem' }}>Location</th>
-                      <th style={{ padding: '0.75rem' }}>Search Date</th>
-                      <th style={{ padding: '0.75rem' }}>Number of Leads</th>
+                      <th style={{ padding: '0.75rem' }}>Search Name</th>
+                      <th style={{ padding: '0.75rem' }}>Created</th>
+                      <th style={{ padding: '0.75rem' }}>Status</th>
+                      <th style={{ padding: '0.75rem' }}>Qualified Leads</th>
                       <th style={{ padding: '0.75rem', textAlign: 'right' }}>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {savedSearches.map((s, i) => (
+                    {savedSearches.slice(0, 5).map((s, i) => (
                       <tr key={i} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                        <td style={{ padding: '0.75rem', fontWeight: 'bold' }}>{s.service}</td>
-                        <td style={{ padding: '0.75rem' }}>{s.location}</td>
-                        <td style={{ padding: '0.75rem' }}>{new Date(s.date_created).toLocaleString()}</td>
-                        <td style={{ padding: '0.75rem' }}>{s.leads_count}</td>
+                        <td style={{ padding: '0.75rem', fontWeight: 'bold', color: 'var(--text-main)' }}>{s.name || `${s.service} - ${s.location}`}</td>
+                        <td style={{ padding: '0.75rem', color: 'var(--text-secondary)' }}>{new Date(s.date_created).toLocaleString()}</td>
+                        <td style={{ padding: '0.75rem' }}>
+                          <span style={{ 
+                            padding: '0.2rem 0.5rem', 
+                            borderRadius: '4px', 
+                            fontSize: '0.75rem', 
+                            fontWeight: 'bold',
+                            backgroundColor: s.status === 'Searching' ? 'rgba(59, 130, 246, 0.15)' : 'rgba(16, 185, 129, 0.15)',
+                            color: s.status === 'Searching' ? '#3b82f6' : '#10b981',
+                            border: s.status === 'Searching' ? '1px solid rgba(59, 130, 246, 0.3)' : '1px solid rgba(16, 185, 129, 0.3)'
+                          }}>
+                            {s.status}
+                          </span>
+                        </td>
+                        <td style={{ padding: '0.75rem', fontWeight: 'bold', color: '#10b981' }}>{s.qualified_count || s.leads_count || 0}</td>
                         <td style={{ padding: '0.75rem', textAlign: 'right' }}>
                           <button 
                             className="btn-generate"
@@ -765,6 +830,91 @@ function App() {
                             style={{ width: 'auto', padding: '0.25rem 0.75rem', margin: 0, fontSize: '0.8rem' }}
                           >
                             Open
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'searches' && (
+        <div className="fade-in">
+          <div className="card" style={{ marginBottom: '2rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+              <div>
+                <h2 style={{ margin: '0 0 0.25rem 0', color: 'var(--text-main)' }}>Saved Searches</h2>
+                <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', margin: 0 }}>
+                  Manage and reopen all historical search projects.
+                </p>
+              </div>
+              <button 
+                className="btn-generate" 
+                onClick={loadSavedSearches} 
+                disabled={isDbLoading} 
+                style={{ width: 'auto', padding: '0.5rem 1rem', marginTop: 0 }}
+              >
+                {isDbLoading ? 'Refreshing...' : 'Refresh List'}
+              </button>
+            </div>
+
+            {savedSearches.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '3rem 2rem', color: 'var(--text-secondary)' }}>
+                No saved searches found. Go to the Lead Finder tab to run a new search.
+              </div>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.9rem' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '2px solid var(--border-color)', color: 'var(--text-secondary)' }}>
+                      <th style={{ padding: '0.75rem' }}>Search Name</th>
+                      <th style={{ padding: '0.75rem' }}>Service</th>
+                      <th style={{ padding: '0.75rem' }}>Location</th>
+                      <th style={{ padding: '0.75rem' }}>Created</th>
+                      <th style={{ padding: '0.75rem' }}>Status</th>
+                      <th style={{ padding: '0.75rem' }}>Qualified Leads</th>
+                      <th style={{ padding: '0.75rem', textAlign: 'right' }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {savedSearches.map((s, i) => (
+                      <tr key={i} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                        <td style={{ padding: '0.75rem', fontWeight: 'bold', color: 'var(--text-main)' }}>{s.name || `${s.service} - ${s.location}`}</td>
+                        <td style={{ padding: '0.75rem' }}>{s.service}</td>
+                        <td style={{ padding: '0.75rem' }}>{s.location}</td>
+                        <td style={{ padding: '0.75rem', color: 'var(--text-secondary)' }}>{new Date(s.date_created).toLocaleString()}</td>
+                        <td style={{ padding: '0.75rem' }}>
+                          <span style={{ 
+                            padding: '0.2rem 0.5rem', 
+                            borderRadius: '4px', 
+                            fontSize: '0.75rem', 
+                            fontWeight: 'bold',
+                            backgroundColor: s.status === 'Searching' ? 'rgba(59, 130, 246, 0.15)' : 'rgba(16, 185, 129, 0.15)',
+                            color: s.status === 'Searching' ? '#3b82f6' : '#10b981',
+                            border: s.status === 'Searching' ? '1px solid rgba(59, 130, 246, 0.3)' : '1px solid rgba(16, 185, 129, 0.3)'
+                          }}>
+                            {s.status}
+                          </span>
+                        </td>
+                        <td style={{ padding: '0.75rem', fontWeight: 'bold', color: '#10b981' }}>{s.qualified_count || s.leads_count || 0}</td>
+                        <td style={{ padding: '0.75rem', textAlign: 'right', display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                          <button 
+                            className="btn-generate"
+                            onClick={() => handleOpenSavedSearch(s.id)}
+                            style={{ width: 'auto', padding: '0.25rem 0.75rem', margin: 0, fontSize: '0.8rem' }}
+                          >
+                            Open
+                          </button>
+                          <button 
+                            className="btn-generate"
+                            onClick={() => handleDeleteSearch(s.id)}
+                            style={{ width: 'auto', padding: '0.25rem 0.75rem', margin: 0, fontSize: '0.8rem', backgroundColor: '#ef4444', border: 'none' }}
+                          >
+                            Delete
                           </button>
                         </td>
                       </tr>
