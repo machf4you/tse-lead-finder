@@ -777,9 +777,11 @@ app.post('/api/search', async (req, res) => {
     } catch (bgErr) {
       console.error(`Background search error for ID ${searchId}:`, bgErr.message);
       try {
-        await db.run("UPDATE searches SET status = 'Completed' WHERE id = ?", [searchId]);
+        await db.run("DELETE FROM leads WHERE search_id = ?", [searchId]);
+        await db.run("DELETE FROM searches WHERE id = ?", [searchId]);
+        console.log(`[BACKGROUND SEARCH] Deleted failed search ID ${searchId} from database.`);
       } catch (dbErr) {
-        console.error("Failed to set Completed status after error:", dbErr.message);
+        console.error("Failed to clean up failed search record:", dbErr.message);
       }
     }
   })();

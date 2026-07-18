@@ -20,7 +20,7 @@ const getRootDomain = (urlStr) => {
 
 const faviconSessionCache = {};
 
-function LeadCard({ lead, showDate, onExclude, isEven }) {
+function LeadCard({ lead, showDate, onExclude, isEven, onContact }) {
   const [copied, setCopied] = useState(false);
   const [isExcluding, setIsExcluding] = useState(false);
   const [isExcluded, setIsExcluded] = useState(false);
@@ -252,7 +252,7 @@ function LeadCard({ lead, showDate, onExclude, isEven }) {
       {lead.name !== 'Error' && (
         <div style={{ display: 'flex', gap: '0.5rem', flexShrink: 0 }}>
           <button 
-            onClick={() => console.log('Contact clicked for:', lead.website)}
+            onClick={() => onContact && onContact()}
             style={{ background: '#10b981', color: '#fff', border: 'none', padding: '0.35rem 1.1rem', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '0.8rem', minWidth: '75px' }}
           >
             Contact
@@ -286,6 +286,8 @@ function App() {
   const [searchSummary, setSearchSummary] = useState(null);
 
   const [activeTab, setActiveTab] = useState('finder');
+  const [selectedLead, setSelectedLead] = useState(null);
+  const [previousTab, setPreviousTab] = useState('finder');
   const [excludedDomains, setExcludedDomains] = useState([]);
   const [excludedTypes, setExcludedTypes] = useState([]);
   const [newDomainInput, setNewDomainInput] = useState('');
@@ -448,6 +450,7 @@ function App() {
       const response = await fetch(`/api/searches/${id}`);
       if (response.ok) {
         const data = await response.json();
+        setSearchError('');
         setServiceQuery(data.service || '');
         setLocationQuery(data.location || '');
         setResults(data.leads || []);
@@ -493,6 +496,11 @@ function App() {
                   setIsSearching(false);
                   loadSavedSearches();
                 }
+              } else {
+                clearInterval(interval);
+                setIsSearching(false);
+                setActiveSearchId(null);
+                setSearchError('No websites found for this query.');
               }
             } catch (e) {
               clearInterval(interval);
@@ -594,6 +602,8 @@ function App() {
             } else {
               clearInterval(interval);
               setIsSearching(false);
+              setActiveSearchId(null);
+              setSearchError('No websites found for this query.');
             }
           } catch (e) {
             clearInterval(interval);
@@ -613,9 +623,11 @@ function App() {
     }
   };
 
-
-
-
+  const handleContactLead = (lead) => {
+    setPreviousTab(activeTab);
+    setSelectedLead(lead);
+    setActiveTab('lead-details');
+  };
 
   return (
     <div className="app-container">
@@ -643,7 +655,7 @@ function App() {
           Lead Finder
         </button>
         <button 
-          onClick={() => setActiveTab('searches')}
+          onClick={() => { setActiveTab('searches'); loadSavedSearches(); }}
           style={{
             background: 'none',
             border: 'none',
@@ -769,7 +781,7 @@ function App() {
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', marginTop: '1.5rem' }}>
                   {results.map((r, i) => (
-                    <LeadCard key={i} lead={r} showDate={false} onExclude={handleExcludeLead} isEven={i % 2 === 0} />
+                    <LeadCard key={i} lead={r} showDate={false} onExclude={handleExcludeLead} isEven={i % 2 === 0} onContact={() => handleContactLead(r)} />
                   ))}
                 </div>
               </div>
@@ -1025,6 +1037,55 @@ function App() {
                 </div>
               </div>
 
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'lead-details' && selectedLead && (
+        <div className="fade-in">
+          <div className="card" style={{ padding: '2rem', maxWidth: '600px', margin: '0 auto' }}>
+            <button 
+              onClick={() => setActiveTab(previousTab || 'finder')}
+              className="btn-generate"
+              style={{ width: 'auto', padding: '0.5rem 1rem', marginBottom: '1.5rem', background: 'var(--border-color)', border: 'none' }}
+            >
+              ← Back to Results
+            </button>
+            <h2 style={{ color: 'var(--text-main)', marginBottom: '1.5rem' }}>Lead Details</h2>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', textAlign: 'left', marginBottom: '2rem' }}>
+              <div>
+                <strong style={{ color: 'var(--text-secondary)', display: 'block', fontSize: '0.85rem', textTransform: 'uppercase', marginBottom: '0.25rem' }}>Company Name</strong>
+                <span style={{ fontSize: '1.4rem', fontWeight: 'bold', color: 'var(--text-main)' }}>{selectedLead.name}</span>
+              </div>
+              <div>
+                <strong style={{ color: 'var(--text-secondary)', display: 'block', fontSize: '0.85rem', textTransform: 'uppercase', marginBottom: '0.25rem' }}>Website</strong>
+                <a href={selectedLead.website} target="_blank" rel="noopener noreferrer" style={{ fontSize: '1.1rem', color: 'var(--accent-color)', textDecoration: 'none' }}>
+                  {selectedLead.website}
+                </a>
+              </div>
+              <div>
+                <strong style={{ color: 'var(--text-secondary)', display: 'block', fontSize: '0.85rem', textTransform: 'uppercase', marginBottom: '0.25rem' }}>Email</strong>
+                {selectedLead.email ? (
+                  <a href={`mailto:${selectedLead.email}`} style={{ fontSize: '1.1rem', color: 'var(--accent-color)', textDecoration: 'underline' }}>
+                    {selectedLead.email}
+                  </a>
+                ) : (
+                  <span style={{ fontSize: '1.1rem', color: 'var(--text-secondary)', fontStyle: 'italic' }}>No email found</span>
+                )}
+              </div>
+            </div>
+            <div style={{ 
+              padding: '1.5rem', 
+              backgroundColor: 'rgba(59, 130, 246, 0.05)', 
+              border: '1px dashed #3b82f6', 
+              borderRadius: 'var(--radius-md)', 
+              color: '#3b82f6', 
+              fontWeight: 'bold',
+              fontSize: '1.1rem',
+              textAlign: 'center'
+            }}>
+              Lead Details - Coming Soon
             </div>
           </div>
         </div>
