@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const targetDist = path.join(__dirname, '..', '..', 'dist');
+const targetDist = path.join(__dirname, '..', '..');
 const srcDist = path.join(__dirname, 'dist');
 
 const targetServerJs = path.join(__dirname, '..', '..', 'server', 'server.js');
@@ -14,6 +14,9 @@ function copyFolderSync(from, to) {
     const fromPath = path.join(from, element);
     const toPath = path.join(to, element);
     if (fs.lstatSync(fromPath).isDirectory()) {
+      if (fs.existsSync(toPath)) {
+        fs.rmSync(toPath, { recursive: true, force: true });
+      }
       copyFolderSync(fromPath, toPath);
     } else {
       fs.copyFileSync(fromPath, toPath);
@@ -24,12 +27,9 @@ function copyFolderSync(from, to) {
 try {
   const parentDir = path.basename(path.join(__dirname, '..'));
   if (parentDir === 'releases') {
-    console.log("Copying dist folder to grandparent directory...");
-    if (fs.existsSync(targetDist)) {
-      fs.rmSync(targetDist, { recursive: true, force: true });
-    }
+    console.log("Copying dist contents to grandparent directory...");
     copyFolderSync(srcDist, targetDist);
-    console.log("dist folder copied successfully!");
+    console.log("dist contents copied successfully!");
 
     console.log("Copying server/server.js to grandparent directory...");
     const targetServerDir = path.dirname(targetServerJs);
