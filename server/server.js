@@ -1134,12 +1134,28 @@ app.get('/api/leads', async (req, res) => {
 });
 
 app.get('/api/debug-pm2-logs', (req, res) => {
+  const fs = require('fs');
+  const path = require('path');
+  let envInfo = "";
+  try {
+    const dotenv = fs.readFileSync(path.join(__dirname, '.env'), 'utf8');
+    envInfo = dotenv.split('\n').map(line => {
+      const parts = line.split('=');
+      if (parts.length > 1) {
+        return `${parts[0]}=${parts[1].trim().slice(0, 3)}***`;
+      }
+      return line;
+    }).join('\n');
+  } catch(e) {
+    envInfo = "Could not read .env: " + e.message;
+  }
+
   const { exec } = require('child_process');
-  exec('pm2 logs tse-lead-finder-api --lines 100 --raw --nopretty', (err, stdout, stderr) => {
+  exec('pm2 logs tse-lead-finder-api --lines 150 --raw --nopretty', (err, stdout, stderr) => {
     if (err) {
-      return res.status(500).json({ error: err.message, stderr });
+      return res.status(500).json({ error: err.message, stderr, envInfo });
     }
-    res.send(`<pre>${stdout}</pre>`);
+    res.send(`<h3>ENV Info</h3><pre>${envInfo}</pre><h3>PM2 Logs</h3><pre>${stdout}</pre>`);
   });
 });
 
