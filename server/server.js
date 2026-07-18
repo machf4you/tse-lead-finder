@@ -22,29 +22,6 @@ try {
   console.error("Failed to clean .env file:", e.message);
 }
 
-// Ensure parent dist is a symlink to current/dist so Nginx serves the active release
-try {
-  const parentDist = path.join(__dirname, '../../dist');
-  let isSymlink = false;
-  try {
-    const lstat = fs.lstatSync(parentDist);
-    isSymlink = lstat.isSymbolicLink();
-  } catch(e) {
-    // If it doesn't exist, we will create it
-  }
-
-  if (!isSymlink) {
-    console.log("Parent dist is not a symlink. Replacing with symlink to current/dist...");
-    if (fs.existsSync(parentDist)) {
-      fs.rmSync(parentDist, { recursive: true, force: true });
-    }
-    fs.symlinkSync('current/dist', parentDist);
-    console.log("Successfully created symlink: parent dist -> current/dist");
-  }
-} catch (e) {
-  console.error("Failed to symlink parent dist:", e.message);
-}
-
 require('dotenv').config();
 
 const app = express();
@@ -1178,73 +1155,21 @@ app.get('/api/leads', async (req, res) => {
   }
 });
 
-app.get('/api/debug-caddyfile', (req, res) => {
-  const fs = require('fs');
-  try {
-    const content = fs.readFileSync('/etc/caddy/Caddyfile', 'utf8');
-    res.send(`<pre>${content}</pre>`);
-  } catch(e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-app.get('/api/debug-local-curl', (req, res) => {
-  const { exec } = require('child_process');
-  exec('curl -s http://localhost:3002/api/debug-caddyfile', (err, stdout, stderr) => {
-    res.json({ stdout, stderr });
-  });
-});
-
-app.get('/api/debug-find-paths', (req, res) => {
-  const { exec } = require('child_process');
-  exec('find / -name "*index-DmsW_Bsn.js*" 2>/dev/null', (err, stdout, stderr) => {
-    res.json({ stdout: stdout.trim().split('\n'), stderr });
-  });
-});
-
-app.get('/api/debug-permissions', (req, res) => {
-  const fs = require('fs');
-  const path = require('path');
-  const targetFile = path.join(__dirname, '../../dist/assets/index-ia2eY_Il.js');
-  const targetDir = path.join(__dirname, '../../dist');
-  let results = {};
-  try {
-    results.targetExists = fs.existsSync(targetFile);
-    results.targetStat = fs.statSync(targetFile);
-    results.targetLstat = fs.lstatSync(targetFile);
-    results.dirLstat = fs.lstatSync(targetDir);
-  } catch(e) {
-    results.error = e.message;
-  }
-  res.json(results);
-});
-
 app.get('/api/debug-nginx', (req, res) => {
   const fs = require('fs');
   const path = require('path');
   const parentDir = path.join(__dirname, '../..');
-  const results = {};
-  
+  let list = [];
   try {
-    results.parentList = fs.readdirSync(parentDir).map(file => {
+    list = fs.readdirSync(parentDir).map(file => {
       const full = path.join(parentDir, file);
-      let isSymlink = false;
-      try { isSymlink = fs.lstatSync(full).isSymbolicLink(); } catch(e) {}
-      return { file, isDir: fs.statSync(full).isDirectory(), isSymlink };
+      const isDir = fs.statSync(full).isDirectory();
+      return { file, isDir };
     });
-  } catch(e) { results.parentError = e.message; }
-
-  try {
-    const distDir = path.join(parentDir, 'dist');
-    results.distList = fs.readdirSync(distDir);
-  } catch(e) { results.distError = e.message; }
-
-  try {
-    const assetsDir = path.join(parentDir, 'dist/assets');
-    results.assetsList = fs.readdirSync(assetsDir);
-  } catch(e) { results.assetsError = e.message; }
-
-  res.json(results);
+  } catch(e) {
+    return res.status(500).json({ error: e.message });
+  }
+  res.json({ parentDir, list });
 });
 
 app.listen(port, (err) => {
