@@ -632,6 +632,7 @@ function App() {
   return (
     <div className="app-container">
       <header className="header">
+        <div style={{ color: '#eab308', fontSize: '2.5rem', fontWeight: 'bold', marginBottom: '0.5rem' }}>TEST</div>
         <h1>TSE Lead Finder</h1>
         <p>Find business websites and extract contact details.</p>
       </header>
