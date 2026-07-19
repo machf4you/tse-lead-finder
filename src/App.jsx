@@ -579,7 +579,24 @@ function App() {
 
 
   return (
-    <div className="app-container">
+    <div className="app-container" style={{ paddingTop: '80px' }}>
+      <div style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        height: '40px',
+        backgroundColor: '#fef08a',
+        color: '#000',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontWeight: 'bold',
+        zIndex: 9999,
+        borderBottom: '1px solid #eab308'
+      }}>
+        TEST BUILD – 19 July – 11:35
+      </div>
       <header className="header">
         <h1>TSE Lead Finder</h1>
         <p>Find business websites and extract contact details.</p>
