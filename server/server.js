@@ -32,133 +32,139 @@ app.use(express.json());
 
 let db;
 (async () => {
-  db = await open({
-    filename: './leads.db',
-    driver: sqlite3.Database
-  });
-  
-  // Create tables and perform migrations
-  await db.exec(`
-    CREATE TABLE IF NOT EXISTS searches (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL DEFAULT '',
-      service TEXT,
-      location TEXT,
-      provider TEXT,
-      leads_count INTEGER,
-      raw_count INTEGER,
-      unique_count INTEGER,
-      qualified_count INTEGER,
-      directories_removed INTEGER,
-      suppliers_removed INTEGER,
-      excluded_domains_removed INTEGER,
-      date_created DATETIME DEFAULT CURRENT_TIMESTAMP,
-      status TEXT DEFAULT 'Completed',
-      notes TEXT,
-      metadata TEXT DEFAULT '{}'
-    );
-    CREATE TABLE IF NOT EXISTS excluded_domains (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      domain TEXT UNIQUE NOT NULL,
-      date_added DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
-    CREATE TABLE IF NOT EXISTS excluded_business_types (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT UNIQUE NOT NULL,
-      date_added DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
-  `);
-
-  // Migrate searches table if needed (adding name, status, metadata)
   try {
-    const sCols = await db.all("PRAGMA table_info(searches)");
-    if (sCols && sCols.length > 0) {
-      const hasName = sCols.some(c => c.name === 'name');
-      const hasStatus = sCols.some(c => c.name === 'status');
-      const hasMetadata = sCols.some(c => c.name === 'metadata');
-      if (!hasName) {
-        console.log("Migrating searches table: adding name column...");
-        await db.exec("ALTER TABLE searches ADD COLUMN name TEXT NOT NULL DEFAULT '';");
+    db = await open({
+      filename: './leads.db',
+      driver: sqlite3.Database
+    });
+    
+    // Create tables and perform migrations
+    await db.exec(`
+      CREATE TABLE IF NOT EXISTS searches (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL DEFAULT '',
+        service TEXT,
+        location TEXT,
+        provider TEXT,
+        leads_count INTEGER,
+        raw_count INTEGER,
+        unique_count INTEGER,
+        qualified_count INTEGER,
+        directories_removed INTEGER,
+        suppliers_removed INTEGER,
+        excluded_domains_removed INTEGER,
+        date_created DATETIME DEFAULT CURRENT_TIMESTAMP,
+        status TEXT DEFAULT 'Completed',
+        notes TEXT,
+        metadata TEXT DEFAULT '{}'
+      );
+      CREATE TABLE IF NOT EXISTS excluded_domains (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        domain TEXT UNIQUE NOT NULL,
+        date_added DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS excluded_business_types (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT UNIQUE NOT NULL,
+        date_added DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // Migrate searches table if needed (adding name, status, metadata)
+    try {
+      const sCols = await db.all("PRAGMA table_info(searches)");
+      if (sCols && sCols.length > 0) {
+        const hasName = sCols.some(c => c.name === 'name');
+        const hasStatus = sCols.some(c => c.name === 'status');
+        const hasMetadata = sCols.some(c => c.name === 'metadata');
+        if (!hasName) {
+          console.log("Migrating searches table: adding name column...");
+          await db.exec("ALTER TABLE searches ADD COLUMN name TEXT NOT NULL DEFAULT '';");
+        }
+        if (!hasStatus) {
+          console.log("Migrating searches table: adding status column...");
+          await db.exec("ALTER TABLE searches ADD COLUMN status TEXT DEFAULT 'Completed';");
+        }
+        if (!hasMetadata) {
+          console.log("Migrating searches table: adding metadata column...");
+          await db.exec("ALTER TABLE searches ADD COLUMN metadata TEXT DEFAULT '{}';");
+        }
       }
-      if (!hasStatus) {
-        console.log("Migrating searches table: adding status column...");
-        await db.exec("ALTER TABLE searches ADD COLUMN status TEXT DEFAULT 'Completed';");
-      }
-      if (!hasMetadata) {
-        console.log("Migrating searches table: adding metadata column...");
-        await db.exec("ALTER TABLE searches ADD COLUMN metadata TEXT DEFAULT '{}';");
-      }
+    } catch (e) {
+      console.error("Failed to migrate searches table:", e.message);
     }
-  } catch (e) {
-    console.error("Failed to migrate searches table:", e.message);
-  }
 
-  // Migrate leads table if needed (adding search_id and removing global unique website/email constraint)
-  let migrateLeads = false;
-  try {
-    const cols = await db.all("PRAGMA table_info(leads)");
-    if (cols && cols.length > 0) {
-      const hasSearchId = cols.some(c => c.name === 'search_id');
-      if (!hasSearchId) {
+    // Migrate leads table if needed (adding search_id and removing global unique website/email constraint)
+    let migrateLeads = false;
+    try {
+      const cols = await db.all("PRAGMA table_info(leads)");
+      if (cols && cols.length > 0) {
+        const hasSearchId = cols.some(c => c.name === 'search_id');
+        if (!hasSearchId) {
+          migrateLeads = true;
+        }
+        /*
+        const hasCategory = cols.some(c => c.name === 'category');
+        if (!hasCategory) {
+          console.log("Migrating leads table: adding category column...");
+          await db.exec("ALTER TABLE leads ADD COLUMN category TEXT DEFAULT 'qualified';");
+        }
+        */
+      } else {
         migrateLeads = true;
       }
-      const hasCategory = cols.some(c => c.name === 'category');
-      if (!hasCategory) {
-        console.log("Migrating leads table: adding category column...");
-        await db.exec("ALTER TABLE leads ADD COLUMN category TEXT DEFAULT 'qualified';");
-      }
-    } else {
+    } catch (e) {
       migrateLeads = true;
     }
-  } catch (e) {
-    migrateLeads = true;
-  }
 
-  if (migrateLeads) {
-    console.log("Migrating leads table: dropping and recreating with search_id relation...");
-    await db.exec("DROP TABLE IF EXISTS leads;");
-  }
-
-  await db.exec(`
-    CREATE TABLE IF NOT EXISTS leads (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      search_id INTEGER,
-      name TEXT,
-      email TEXT,
-      website TEXT,
-      service TEXT,
-      location TEXT,
-      category TEXT DEFAULT 'qualified',
-      date_added DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY(search_id) REFERENCES searches(id) ON DELETE CASCADE
-    );
-  `);
-
-  // Populate default excluded domains if empty
-  const domCount = await db.get("SELECT COUNT(*) as count FROM excluded_domains");
-  if (domCount.count === 0) {
-    const defaultDomains = [
-      'which.co.uk', 'threebestrated.co.uk', 'checkatrade.com', 'trustatrader.com',
-      'buildersup.co.uk', 'goodcompanies.co.uk', 'yell.com', 'yelp.co.uk', 'freeindex.co.uk'
-    ];
-    for (const d of defaultDomains) {
-      await db.run("INSERT OR IGNORE INTO excluded_domains (domain) VALUES (?)", d);
+    if (migrateLeads) {
+      console.log("Migrating leads table: dropping and recreating with search_id relation...");
+      await db.exec("DROP TABLE IF EXISTS leads;");
     }
-  }
 
-  // Populate default excluded business types if empty
-  const typeCount = await db.get("SELECT COUNT(*) as count FROM excluded_business_types");
-  if (typeCount.count === 0) {
-    const defaultTypes = [
-      'Plumbing Supplies', 'Builders Merchant', 'Trade Counter', 'Wholesaler',
-      'Water Company', 'Manufacturer', 'Distributor'
-    ];
-    for (const t of defaultTypes) {
-      await db.run("INSERT OR IGNORE INTO excluded_business_types (name) VALUES (?)", t);
+    await db.exec(`
+      CREATE TABLE IF NOT EXISTS leads (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        search_id INTEGER,
+        name TEXT,
+        email TEXT,
+        website TEXT,
+        service TEXT,
+        location TEXT,
+        category TEXT DEFAULT 'qualified',
+        date_added DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(search_id) REFERENCES searches(id) ON DELETE CASCADE
+      );
+    `);
+
+    // Populate default excluded domains if empty
+    const domCount = await db.get("SELECT COUNT(*) as count FROM excluded_domains");
+    if (domCount.count === 0) {
+      const defaultDomains = [
+        'which.co.uk', 'threebestrated.co.uk', 'checkatrade.com', 'trustatrader.com',
+        'buildersup.co.uk', 'goodcompanies.co.uk', 'yell.com', 'yelp.co.uk', 'freeindex.co.uk'
+      ];
+      for (const d of defaultDomains) {
+        await db.run("INSERT OR IGNORE INTO excluded_domains (domain) VALUES (?)", d);
+      }
     }
-  }
 
-  console.log("SQLite database initialized with exclusions tables.");
+    // Populate default excluded business types if empty
+    const typeCount = await db.get("SELECT COUNT(*) as count FROM excluded_business_types");
+    if (typeCount.count === 0) {
+      const defaultTypes = [
+        'Plumbing Supplies', 'Builders Merchant', 'Trade Counter', 'Wholesaler',
+        'Water Company', 'Manufacturer', 'Distributor'
+      ];
+      for (const t of defaultTypes) {
+        await db.run("INSERT OR IGNORE INTO excluded_business_types (name) VALUES (?)", t);
+      }
+    }
+
+    console.log("SQLite database initialized with exclusions tables.");
+  } catch (err) {
+    console.error("Failed to initialize database on startup:", err.message || err);
+  }
 })();
 
 // Health check endpoint
