@@ -1,3 +1,22 @@
+process.on('uncaughtException', (err) => {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const logPath = path.join(__dirname, '..', 'dist', 'debug.txt');
+    fs.writeFileSync(logPath, `Uncaught Exception: ${err.message}\nStack: ${err.stack}\n`, 'utf8');
+  } catch(e) {}
+  process.exit(1);
+});
+process.on('unhandledRejection', (reason) => {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const logPath = path.join(__dirname, '..', 'dist', 'debug.txt');
+    fs.writeFileSync(logPath, `Unhandled Rejection: ${reason.message || reason}\nStack: ${reason.stack || ''}\n`, 'utf8');
+  } catch(e) {}
+  process.exit(1);
+});
+
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
@@ -811,6 +830,12 @@ app.post('/api/search', async (req, res) => {
 
     } catch (bgErr) {
       console.error(`Background search error for ID ${searchId}:`, bgErr.message);
+      try {
+        const fs = require('fs');
+        const path = require('path');
+        const logPath = path.join(__dirname, '..', 'dist', 'debug.txt');
+        fs.writeFileSync(logPath, `Background Error for ID ${searchId}: ${bgErr.message}\nStack: ${bgErr.stack}\n`, 'utf8');
+      } catch(e) {}
       try {
         await db.run("DELETE FROM leads WHERE search_id = ?", [searchId]);
         await db.run("DELETE FROM searches WHERE id = ?", [searchId]);
