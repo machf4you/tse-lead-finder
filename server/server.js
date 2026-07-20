@@ -103,18 +103,21 @@ let db;
         if (!hasSearchId) {
           migrateLeads = true;
         }
-        /*
         const hasCategory = cols.some(c => c.name === 'category');
         if (!hasCategory) {
           console.log("Migrating leads table: adding category column...");
-          await db.exec("ALTER TABLE leads ADD COLUMN category TEXT DEFAULT 'qualified';");
+          try {
+            await db.exec("ALTER TABLE leads ADD COLUMN category TEXT DEFAULT 'qualified';");
+            console.log("Successfully added category column to leads table.");
+          } catch (alterErr) {
+            console.error("Failed to add category column to leads table:", alterErr.message);
+          }
         }
-        */
       } else {
         migrateLeads = true;
       }
     } catch (e) {
-      migrateLeads = true;
+      console.error("Failed to inspect leads table schema:", e.message);
     }
 
     if (migrateLeads) {
