@@ -838,6 +838,48 @@ function App() {
 
       {activeTab === 'finder' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+          {results.length > 0 && (
+            <button
+              onClick={() => {
+                setResults([]);
+                setUrls('');
+                setSearchSummary(null);
+                setActiveSearchId(null);
+                setServiceQuery('');
+                setLocationQuery('');
+                setSearchError('');
+                setActiveTab('finder');
+              }}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: 'var(--text-secondary)',
+                fontWeight: 'bold',
+                fontSize: '0.95rem',
+                cursor: 'pointer',
+                textAlign: 'left',
+                padding: '0.75rem 1rem',
+                borderRadius: 'var(--radius-md)',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                transition: 'all 0.2s',
+                border: '1px solid var(--border-color)',
+                alignSelf: 'flex-start',
+                marginBottom: '-1rem'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.color = 'var(--accent-color)';
+                e.currentTarget.style.borderColor = 'var(--accent-color)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.color = 'var(--text-secondary)';
+                e.currentTarget.style.borderColor = 'var(--border-color)';
+              }}
+            >
+              ← Back to Home
+            </button>
+          )}
           {/* Search Mode Card */}
           <div className="card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', padding: '1.5rem' }}>
             <div>
