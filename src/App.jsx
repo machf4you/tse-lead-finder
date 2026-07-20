@@ -711,66 +711,130 @@ function App() {
   };
 
   return (
-    <div className="app-container">
-      <header className="header">
-        <div style={{ color: '#eab308', fontSize: '2.5rem', fontWeight: 'bold', marginBottom: '0.5rem' }}>TEST</div>
-        <h1>TSE Lead Finder</h1>
-        <p>Find business websites and extract contact details.</p>
-      </header>
+    <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: 'var(--bg-color)', color: 'var(--text-main)' }}>
+      {/* Left-hand Sidebar */}
+      <aside style={{
+        width: '260px',
+        borderRight: '1px solid var(--border-color)',
+        padding: '2rem 1.5rem',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '1.5rem',
+        flexShrink: 0,
+        backgroundColor: 'rgba(15, 23, 42, 0.2)'
+      }}>
+        {/* Back to TSE Apps Button */}
+        <button
+          onClick={() => window.location.href = 'https://audit-dev.thesearchequation.co.uk'}
+          style={{
+            background: 'none',
+            border: 'none',
+            color: 'var(--text-secondary)',
+            fontWeight: 'bold',
+            fontSize: '0.95rem',
+            cursor: 'pointer',
+            textAlign: 'left',
+            padding: '0.75rem 1rem',
+            borderRadius: 'var(--radius-md)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+            transition: 'all 0.2s',
+            border: '1px solid var(--border-color)'
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.color = 'var(--accent-color)';
+            e.currentTarget.style.borderColor = 'var(--accent-color)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.color = 'var(--text-secondary)';
+            e.currentTarget.style.borderColor = 'var(--border-color)';
+          }}
+        >
+          ← Back to TSE Apps
+        </button>
 
-      <div style={{ display: 'flex', gap: '1rem', borderBottom: '1px solid var(--border-color)', marginBottom: '2rem', paddingBottom: '0.5rem' }}>
-        <button 
-          onClick={() => setActiveTab('finder')}
-          style={{
-            background: 'none',
-            border: 'none',
-            color: activeTab === 'finder' ? 'var(--accent-color)' : 'var(--text-secondary)',
-            fontWeight: 'bold',
-            fontSize: '1.1rem',
-            cursor: 'pointer',
-            padding: '0.5rem 1rem',
-            borderBottom: activeTab === 'finder' ? '3px solid var(--accent-color)' : '3px solid transparent',
-            marginBottom: '-0.75rem',
-            transition: 'all 0.2s'
-          }}
-        >
-          Lead Finder
-        </button>
-        <button 
-          onClick={() => { setActiveTab('searches'); loadSavedSearches(); }}
-          style={{
-            background: 'none',
-            border: 'none',
-            color: activeTab === 'searches' ? 'var(--accent-color)' : 'var(--text-secondary)',
-            fontWeight: 'bold',
-            fontSize: '1.1rem',
-            cursor: 'pointer',
-            padding: '0.5rem 1rem',
-            borderBottom: activeTab === 'searches' ? '3px solid var(--accent-color)' : '3px solid transparent',
-            marginBottom: '-0.75rem',
-            transition: 'all 0.2s'
-          }}
-        >
-          Saved Searches
-        </button>
-        <button 
-          onClick={() => setActiveTab('exclusions')}
-          style={{
-            background: 'none',
-            border: 'none',
-            color: activeTab === 'exclusions' ? 'var(--accent-color)' : 'var(--text-secondary)',
-            fontWeight: 'bold',
-            fontSize: '1.1rem',
-            cursor: 'pointer',
-            padding: '0.5rem 1rem',
-            borderBottom: activeTab === 'exclusions' ? '3px solid var(--accent-color)' : '3px solid transparent',
-            marginBottom: '-0.75rem',
-            transition: 'all 0.2s'
-          }}
-        >
-          Lead Exclusions
-        </button>
-      </div>
+        {/* Lead Finder Navigation */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '1rem' }}>
+          <button 
+            onClick={() => setActiveTab('finder')}
+            style={{
+              background: activeTab === 'finder' ? 'rgba(59, 130, 246, 0.08)' : 'none',
+              border: 'none',
+              color: activeTab === 'finder' ? 'var(--accent-color)' : 'var(--text-secondary)',
+              fontWeight: 'bold',
+              fontSize: '1rem',
+              cursor: 'pointer',
+              padding: '0.75rem 1rem',
+              borderRadius: 'var(--radius-md)',
+              textAlign: 'left',
+              transition: 'all 0.2s'
+            }}
+            onMouseEnter={(e) => {
+              if (activeTab !== 'finder') e.currentTarget.style.color = 'var(--text-main)';
+            }}
+            onMouseLeave={(e) => {
+              if (activeTab !== 'finder') e.currentTarget.style.color = 'var(--text-secondary)';
+            }}
+          >
+            Lead Finder
+          </button>
+          <button 
+            onClick={() => { setActiveTab('searches'); loadSavedSearches(); }}
+            style={{
+              background: activeTab === 'searches' ? 'rgba(59, 130, 246, 0.08)' : 'none',
+              border: 'none',
+              color: activeTab === 'searches' ? 'var(--accent-color)' : 'var(--text-secondary)',
+              fontWeight: 'bold',
+              fontSize: '1rem',
+              cursor: 'pointer',
+              padding: '0.75rem 1rem',
+              borderRadius: 'var(--radius-md)',
+              textAlign: 'left',
+              transition: 'all 0.2s'
+            }}
+            onMouseEnter={(e) => {
+              if (activeTab !== 'searches') e.currentTarget.style.color = 'var(--text-main)';
+            }}
+            onMouseLeave={(e) => {
+              if (activeTab !== 'searches') e.currentTarget.style.color = 'var(--text-secondary)';
+            }}
+          >
+            Saved Searches
+          </button>
+          <button 
+            onClick={() => setActiveTab('exclusions')}
+            style={{
+              background: activeTab === 'exclusions' ? 'rgba(59, 130, 246, 0.08)' : 'none',
+              border: 'none',
+              color: activeTab === 'exclusions' ? 'var(--accent-color)' : 'var(--text-secondary)',
+              fontWeight: 'bold',
+              fontSize: '1rem',
+              cursor: 'pointer',
+              padding: '0.75rem 1rem',
+              borderRadius: 'var(--radius-md)',
+              textAlign: 'left',
+              transition: 'all 0.2s'
+            }}
+            onMouseEnter={(e) => {
+              if (activeTab !== 'exclusions') e.currentTarget.style.color = 'var(--text-main)';
+            }}
+            onMouseLeave={(e) => {
+              if (activeTab !== 'exclusions') e.currentTarget.style.color = 'var(--text-secondary)';
+            }}
+          >
+            Lead Exclusions
+          </button>
+        </div>
+      </aside>
+
+      {/* Main Content Area */}
+      <main style={{ flex: 1, padding: '2rem 3rem', overflowY: 'auto' }}>
+        <header className="header" style={{ marginBottom: '2.5rem', textAlign: 'left' }}>
+          <div style={{ color: '#eab308', fontSize: '2.5rem', fontWeight: 'bold', marginBottom: '0.5rem' }}>TEST</div>
+          <h1>TSE Lead Finder</h1>
+          <p>Find business websites and extract contact details.</p>
+        </header>
 
       {activeTab === 'finder' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
@@ -1277,6 +1341,7 @@ function App() {
           </div>
         </div>
       )}
+    </main>
     </div>
   );
 }
