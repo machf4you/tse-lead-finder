@@ -102,6 +102,11 @@ let db;
       if (!hasSearchId) {
         migrateLeads = true;
       }
+      const hasCategory = cols.some(c => c.name === 'category');
+      if (!hasCategory) {
+        console.log("Migrating leads table: adding category column...");
+        await db.exec("ALTER TABLE leads ADD COLUMN category TEXT DEFAULT 'qualified';");
+      }
     } else {
       migrateLeads = true;
     }
@@ -123,6 +128,7 @@ let db;
       website TEXT,
       service TEXT,
       location TEXT,
+      category TEXT DEFAULT 'qualified',
       date_added DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY(search_id) REFERENCES searches(id) ON DELETE CASCADE
     );
@@ -576,7 +582,7 @@ app.post('/api/search', async (req, res) => {
     return raw;
   };
 
-  const processUrls = (rawUrls, allowDeep, allowOrg, seenDomains, serviceStr, locationStr, dbExcludedDomains = [], statsObj = { directoriesRemoved: 0, excludedDomainsRemoved: 0 }) => {
+  const processUrls = (rawUrls, allowDeep, allowOrg, seenDomains, serviceStr, locationStr, dbExcludedDomains = [], statsObj = { directoriesRemoved: 0, excludedDomainsRemoved: 0, directoriesList: [], excludedList: [] }) => {
     const validUrls = [];
     const blocklistDomains = [
       'youtube.com', 'facebook.com', 'twitter.com', 'instagram.com', 'linkedin.com', 'pinterest.com',
@@ -594,6 +600,7 @@ app.post('/api/search', async (req, res) => {
       if (junkPatterns.some(p => lowerHref.includes(p))) {
         console.log(`Rejected:\n${href}\nStage: dedupe/pre-filter\nReason: Matches junk pattern\n`);
         statsObj.directoriesRemoved++;
+        if (statsObj.directoriesList) statsObj.directoriesList.push(href);
         continue;
       }
       if (nonBusinessPaths.some(p => lowerHref.includes(p))) {
@@ -618,11 +625,13 @@ app.post('/api/search', async (req, res) => {
       if (isStaticBlocklisted) {
         console.log(`Rejected:\n${href}\nStage: dedupe/pre-filter\nReason: Blocklisted directory/platform domain (${domain})\n`);
         statsObj.directoriesRemoved++;
+        if (statsObj.directoriesList) statsObj.directoriesList.push(href);
         continue;
       }
       if (isUserBlocklisted) {
         console.log(`Rejected:\n${href}\nStage: dedupe/pre-filter\nReason: Blocklisted directory/platform domain (${domain})\n`);
         statsObj.excludedDomainsRemoved++;
+        if (statsObj.excludedList) statsObj.excludedList.push(href);
         continue;
       }
 
@@ -706,7 +715,7 @@ app.post('/api/search', async (req, res) => {
     try {
       const globalSeenDomains = new Set();
       const allRawUrls = [];
-      const statsObj = { directoriesRemoved: 0, excludedDomainsRemoved: 0 };
+      const statsObj = { directoriesRemoved: 0, excludedDomainsRemoved: 0, directoriesList: [], excludedList: [] };
       let suppliersRemoved = 0;
       
       let dbExcludedDomains = [];
@@ -742,6 +751,22 @@ app.post('/api/search', async (req, res) => {
         WHERE id = ?
       `, [allRawUrls.length, processed.length, statsObj.directoriesRemoved, statsObj.excludedDomainsRemoved, searchId]);
 
+      // Save directories to leads table
+      for (const url of statsObj.directoriesList) {
+        await db.run(`
+          INSERT INTO leads (search_id, name, website, service, location, category)
+          VALUES (?, ?, ?, ?, ?, 'directory')
+        `, [searchId, 'Directory', url, service, location]);
+      }
+
+      // Save excluded domains to leads table
+      for (const url of statsObj.excludedList) {
+        await db.run(`
+          INSERT INTO leads (search_id, name, website, service, location, category)
+          VALUES (?, ?, ?, ?, ?, 'excluded')
+        `, [searchId, 'Excluded', url, service, location]);
+      }
+
       // Verify business signals, scrape subpages, extract email
       const urlsToVerify = processed.slice(0, 50);
       let qualifiedCount = 0;
@@ -752,11 +777,15 @@ app.post('/api/search', async (req, res) => {
           if (lead.isSupplier) {
             suppliersRemoved++;
             await db.run("UPDATE searches SET suppliers_removed = ? WHERE id = ?", [suppliersRemoved, searchId]);
+            await db.run(`
+              INSERT INTO leads (search_id, name, email, website, service, location, category)
+              VALUES (?, ?, ?, ?, ?, ?, 'supplier')
+            `, [searchId, lead.name, lead.email, lead.website, lead.service, lead.location]);
           } else {
             // Write lead to DB
             await db.run(`
-              INSERT INTO leads (search_id, name, email, website, service, location)
-              VALUES (?, ?, ?, ?, ?, ?)
+              INSERT INTO leads (search_id, name, email, website, service, location, category)
+              VALUES (?, ?, ?, ?, ?, ?, 'qualified')
             `, [searchId, lead.name, lead.email, lead.website, lead.service, lead.location]);
 
             qualifiedCount++;

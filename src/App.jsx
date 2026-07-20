@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import './App.css';
 
 const getRootDomain = (urlStr) => {
@@ -249,22 +249,48 @@ function LeadCard({ lead, showDate, onExclude, isEven, onContact }) {
       </div>
 
       {/* Right Column: Actions */}
-      {lead.name !== 'Error' && (
-        <div style={{ display: 'flex', gap: '0.5rem', flexShrink: 0 }}>
-          <button 
-            onClick={() => onContact && onContact()}
-            style={{ background: '#10b981', color: '#fff', border: 'none', padding: '0.35rem 1.1rem', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '0.8rem', minWidth: '75px' }}
-          >
-            Contact
-          </button>
-          <button 
-            onClick={() => setShowConfirm(true)}
-            style={{ background: '#ef4444', color: '#fff', border: 'none', padding: '0.35rem 1.1rem', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '0.8rem', minWidth: '75px' }}
-          >
-            Exclude
-          </button>
-        </div>
-      )}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexShrink: 0 }}>
+        {lead.name !== 'Error' && !lead.isPlaceholder && (!lead.category || lead.category === 'qualified') ? (
+          <>
+            <button 
+              onClick={() => onContact && onContact()}
+              style={{ background: '#10b981', color: '#fff', border: 'none', padding: '0.35rem 1.1rem', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '0.8rem', minWidth: '75px' }}
+            >
+              Contact
+            </button>
+            <button 
+              onClick={() => setShowConfirm(true)}
+              style={{ background: '#ef4444', color: '#fff', border: 'none', padding: '0.35rem 1.1rem', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '0.8rem', minWidth: '75px' }}
+            >
+              Exclude
+            </button>
+          </>
+        ) : null}
+
+        {lead.category && lead.category !== 'qualified' && (
+          <div style={{
+            padding: '0.25rem 0.75rem',
+            borderRadius: '4px',
+            fontSize: '0.75rem',
+            fontWeight: 'bold',
+            textTransform: 'uppercase',
+            letterSpacing: '0.05em',
+            backgroundColor: lead.category === 'directory' ? 'rgba(245, 158, 11, 0.15)' :
+                             lead.category === 'supplier' ? 'rgba(99, 102, 241, 0.15)' :
+                             'rgba(239, 68, 68, 0.15)',
+            color: lead.category === 'directory' ? '#f59e0b' :
+                   lead.category === 'supplier' ? '#6366f1' :
+                   '#ef4444',
+            border: lead.category === 'directory' ? '1px solid rgba(245, 158, 11, 0.3)' :
+                    lead.category === 'supplier' ? '1px solid rgba(99, 102, 241, 0.3)' :
+                    '1px solid rgba(239, 68, 68, 0.3)'
+          }}>
+            {lead.category === 'directory' ? 'Directory' :
+             lead.category === 'supplier' ? 'Supplier' :
+             'Excluded'}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -277,6 +303,7 @@ function App() {
   
   const [urls, setUrls] = useState('');
   const [results, setResults] = useState([]);
+  const [selectedCategory, setSelectedCategory] = useState('qualified');
   const [isExtracting, setIsExtracting] = useState(false);
 
   const [savedSearches, setSavedSearches] = useState([]);
@@ -284,6 +311,58 @@ function App() {
   const [isSavingSearch, setIsSavingSearch] = useState(false);
   const [saveSuccessMessage, setSaveSuccessMessage] = useState('');
   const [searchSummary, setSearchSummary] = useState(null);
+
+  const qualifiedLeads = useMemo(() => results.filter(l => l.category === 'qualified' || !l.category), [results]);
+  
+  const directoryLeads = useMemo(() => {
+    const list = results.filter(l => l.category === 'directory');
+    if (list.length === 0 && searchSummary && searchSummary.directoriesRemoved > 0) {
+      return Array.from({ length: searchSummary.directoriesRemoved }).map((_, idx) => ({
+        id: `dir-placeholder-${idx}`,
+        name: 'Historical Directory Log',
+        website: 'URL filtered during search pre-processing',
+        category: 'directory',
+        isPlaceholder: true
+      }));
+    }
+    return list;
+  }, [results, searchSummary]);
+
+  const supplierLeads = useMemo(() => {
+    const list = results.filter(l => l.category === 'supplier');
+    if (list.length === 0 && searchSummary && searchSummary.suppliersRemoved > 0) {
+      return Array.from({ length: searchSummary.suppliersRemoved }).map((_, idx) => ({
+        id: `supplier-placeholder-${idx}`,
+        name: 'Historical Supplier Log',
+        website: 'Supplier filtered during verification',
+        category: 'supplier',
+        isPlaceholder: true
+      }));
+    }
+    return list;
+  }, [results, searchSummary]);
+
+  const excludedLeads = useMemo(() => {
+    const list = results.filter(l => l.category === 'excluded');
+    if (list.length === 0 && searchSummary && searchSummary.excludedDomainsRemoved > 0) {
+      return Array.from({ length: searchSummary.excludedDomainsRemoved }).map((_, idx) => ({
+        id: `excluded-placeholder-${idx}`,
+        name: 'Historical Excluded Log',
+        website: 'Excluded domain filtered during pre-processing',
+        category: 'excluded',
+        isPlaceholder: true
+      }));
+    }
+    return list;
+  }, [results, searchSummary]);
+
+  const filteredLeads = useMemo(() => {
+    if (selectedCategory === 'qualified') return qualifiedLeads;
+    if (selectedCategory === 'directory') return directoryLeads;
+    if (selectedCategory === 'supplier') return supplierLeads;
+    if (selectedCategory === 'excluded') return excludedLeads;
+    return [];
+  }, [selectedCategory, qualifiedLeads, directoryLeads, supplierLeads, excludedLeads]);
 
   const [activeTab, setActiveTab] = useState('finder');
   const [selectedLead, setSelectedLead] = useState(null);
@@ -454,6 +533,7 @@ function App() {
         setServiceQuery(data.service || '');
         setLocationQuery(data.location || '');
         setResults(data.leads || []);
+        setSelectedCategory('qualified');
         if (data.leads) {
           setUrls(data.leads.map(l => l.website).join('\n'));
         }
@@ -561,6 +641,7 @@ function App() {
     setUrls('');
     setSearchSummary(null);
     setActiveSearchId(null);
+    setSelectedCategory('qualified');
 
     if (pollingIntervalId) {
       clearInterval(pollingIntervalId);
@@ -741,21 +822,120 @@ function App() {
                       <div style={{ color: 'var(--text-secondary)', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Unique Domains</div>
                       <div style={{ fontWeight: '800', fontSize: '3.3rem', color: '#10b981', marginTop: '0.25rem', lineHeight: '1.1' }}>{searchSummary.uniqueCount}</div>
                     </div>
-                    <div style={{ backgroundColor: 'rgba(16, 185, 129, 0.08)', border: '2px solid #10b981', boxShadow: '0 0 12px rgba(16, 185, 129, 0.25)', borderRadius: 'var(--radius-md)', padding: '1.25rem 1rem', textAlign: 'center', transform: 'scale(1.02)' }}>
+                    {/* Qualified Leads Tile */}
+                    <div 
+                      onClick={() => setSelectedCategory('qualified')}
+                      style={selectedCategory === 'qualified' ? {
+                        backgroundColor: 'rgba(16, 185, 129, 0.08)',
+                        border: '2px solid #10b981',
+                        boxShadow: '0 0 12px rgba(16, 185, 129, 0.25)',
+                        borderRadius: 'var(--radius-md)',
+                        padding: '1.25rem 1rem',
+                        textAlign: 'center',
+                        transform: 'scale(1.02)',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s ease'
+                      } : {
+                        backgroundColor: 'rgba(15, 23, 42, 0.3)',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: 'var(--radius-md)',
+                        padding: '1.25rem 1rem',
+                        textAlign: 'center',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s ease'
+                      }}
+                    >
                       <div style={{ color: '#10b981', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 'bold' }}>Qualified Leads</div>
-                      <div style={{ fontWeight: '800', fontSize: '4.0rem', color: '#10b981', marginTop: '0.25rem', lineHeight: '1.1' }}>{searchSummary.qualifiedCount}</div>
+                      <div style={{ fontWeight: '800', fontSize: selectedCategory === 'qualified' ? '4.0rem' : '3.3rem', color: '#10b981', marginTop: '0.25rem', lineHeight: '1.1' }}>
+                        {qualifiedLeads.length}
+                      </div>
                     </div>
-                    <div style={{ backgroundColor: 'rgba(15, 23, 42, 0.3)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: '1.25rem 1rem', textAlign: 'center' }}>
-                      <div style={{ color: 'var(--text-secondary)', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Directories</div>
-                      <div style={{ fontWeight: '800', fontSize: '3.3rem', color: '#ef4444', marginTop: '0.25rem', lineHeight: '1.1' }}>-{searchSummary.directoriesRemoved}</div>
+
+                    {/* Directories Tile */}
+                    <div 
+                      onClick={() => setSelectedCategory('directory')}
+                      style={selectedCategory === 'directory' ? {
+                        backgroundColor: 'rgba(239, 68, 68, 0.08)',
+                        border: '2px solid #ef4444',
+                        boxShadow: '0 0 12px rgba(239, 68, 68, 0.25)',
+                        borderRadius: 'var(--radius-md)',
+                        padding: '1.25rem 1rem',
+                        textAlign: 'center',
+                        transform: 'scale(1.02)',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s ease'
+                      } : {
+                        backgroundColor: 'rgba(15, 23, 42, 0.3)',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: 'var(--radius-md)',
+                        padding: '1.25rem 1rem',
+                        textAlign: 'center',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s ease'
+                      }}
+                    >
+                      <div style={{ color: selectedCategory === 'directory' ? '#ef4444' : 'var(--text-secondary)', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: selectedCategory === 'directory' ? 'bold' : 'normal' }}>Directories</div>
+                      <div style={{ fontWeight: '800', fontSize: selectedCategory === 'directory' ? '4.0rem' : '3.3rem', color: '#ef4444', marginTop: '0.25rem', lineHeight: '1.1' }}>
+                        {directoryLeads.length > 0 ? `-${directoryLeads.length}` : '0'}
+                      </div>
                     </div>
-                    <div style={{ backgroundColor: 'rgba(15, 23, 42, 0.3)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: '1.25rem 1rem', textAlign: 'center' }}>
-                      <div style={{ color: 'var(--text-secondary)', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Suppliers</div>
-                      <div style={{ fontWeight: '800', fontSize: '3.3rem', color: '#ef4444', marginTop: '0.25rem', lineHeight: '1.1' }}>-{searchSummary.suppliersRemoved}</div>
+
+                    {/* Suppliers Tile */}
+                    <div 
+                      onClick={() => setSelectedCategory('supplier')}
+                      style={selectedCategory === 'supplier' ? {
+                        backgroundColor: 'rgba(239, 68, 68, 0.08)',
+                        border: '2px solid #ef4444',
+                        boxShadow: '0 0 12px rgba(239, 68, 68, 0.25)',
+                        borderRadius: 'var(--radius-md)',
+                        padding: '1.25rem 1rem',
+                        textAlign: 'center',
+                        transform: 'scale(1.02)',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s ease'
+                      } : {
+                        backgroundColor: 'rgba(15, 23, 42, 0.3)',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: 'var(--radius-md)',
+                        padding: '1.25rem 1rem',
+                        textAlign: 'center',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s ease'
+                      }}
+                    >
+                      <div style={{ color: selectedCategory === 'supplier' ? '#ef4444' : 'var(--text-secondary)', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: selectedCategory === 'supplier' ? 'bold' : 'normal' }}>Suppliers</div>
+                      <div style={{ fontWeight: '800', fontSize: selectedCategory === 'supplier' ? '4.0rem' : '3.3rem', color: '#ef4444', marginTop: '0.25rem', lineHeight: '1.1' }}>
+                        {supplierLeads.length > 0 ? `-${supplierLeads.length}` : '0'}
+                      </div>
                     </div>
-                    <div style={{ backgroundColor: 'rgba(15, 23, 42, 0.3)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: '1.25rem 1rem', textAlign: 'center' }}>
-                      <div style={{ color: 'var(--text-secondary)', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Excluded</div>
-                      <div style={{ fontWeight: '800', fontSize: '3.3rem', color: '#ef4444', marginTop: '0.25rem', lineHeight: '1.1' }}>-{searchSummary.excludedDomainsRemoved}</div>
+
+                    {/* Excluded Tile */}
+                    <div 
+                      onClick={() => setSelectedCategory('excluded')}
+                      style={selectedCategory === 'excluded' ? {
+                        backgroundColor: 'rgba(239, 68, 68, 0.08)',
+                        border: '2px solid #ef4444',
+                        boxShadow: '0 0 12px rgba(239, 68, 68, 0.25)',
+                        borderRadius: 'var(--radius-md)',
+                        padding: '1.25rem 1rem',
+                        textAlign: 'center',
+                        transform: 'scale(1.02)',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s ease'
+                      } : {
+                        backgroundColor: 'rgba(15, 23, 42, 0.3)',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: 'var(--radius-md)',
+                        padding: '1.25rem 1rem',
+                        textAlign: 'center',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s ease'
+                      }}
+                    >
+                      <div style={{ color: selectedCategory === 'excluded' ? '#ef4444' : 'var(--text-secondary)', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: selectedCategory === 'excluded' ? 'bold' : 'normal' }}>Excluded</div>
+                      <div style={{ fontWeight: '800', fontSize: selectedCategory === 'excluded' ? '4.0rem' : '3.3rem', color: '#ef4444', marginTop: '0.25rem', lineHeight: '1.1' }}>
+                        {excludedLeads.length > 0 ? `-${excludedLeads.length}` : '0'}
+                      </div>
                     </div>
                   </div>
                 )}
@@ -781,9 +961,15 @@ function App() {
                 </div>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', marginTop: '1.5rem' }}>
-                  {results.map((r, i) => (
-                    <LeadCard key={i} lead={r} showDate={false} onExclude={handleExcludeLead} isEven={i % 2 === 0} onContact={() => handleContactLead(r)} />
-                  ))}
+                  {filteredLeads.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: '3rem 1.5rem', color: 'var(--text-secondary)', border: '1px dashed var(--border-color)', borderRadius: 'var(--radius-md)' }}>
+                      No {selectedCategory === 'qualified' ? 'qualified' : selectedCategory} leads found in this search.
+                    </div>
+                  ) : (
+                    filteredLeads.map((r, i) => (
+                      <LeadCard key={i} lead={r} showDate={false} onExclude={handleExcludeLead} isEven={i % 2 === 0} onContact={() => handleContactLead(r)} />
+                    ))
+                  )}
                 </div>
               </div>
             )}
