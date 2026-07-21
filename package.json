@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "node diagnose_env.js && vite build",
+    "build": "node diagnose_env.cjs && vite build",
     "lint": "eslint .",
     "preview": "vite preview"
   },
