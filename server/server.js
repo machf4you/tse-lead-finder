@@ -1,22 +1,3 @@
-process.on('uncaughtException', (err) => {
-  try {
-    const fs = require('fs');
-    const path = require('path');
-    const logPath = path.join(__dirname, '..', 'dist', 'debug.txt');
-    fs.writeFileSync(logPath, `Uncaught Exception: ${err.message}\nStack: ${err.stack}\n`, 'utf8');
-  } catch(e) {}
-  process.exit(1);
-});
-process.on('unhandledRejection', (reason) => {
-  try {
-    const fs = require('fs');
-    const path = require('path');
-    const logPath = path.join(__dirname, '..', 'dist', 'debug.txt');
-    fs.writeFileSync(logPath, `Unhandled Rejection: ${reason.message || reason}\nStack: ${reason.stack || ''}\n`, 'utf8');
-  } catch(e) {}
-  process.exit(1);
-});
-
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
@@ -834,12 +815,6 @@ app.post('/api/search', async (req, res) => {
     } catch (bgErr) {
       console.error(`Background search error for ID ${searchId}:`, bgErr.message);
       try {
-        const fs = require('fs');
-        const path = require('path');
-        const logPath = path.join(__dirname, '..', 'dist', 'debug.txt');
-        fs.writeFileSync(logPath, `Background Error for ID ${searchId}: ${bgErr.message}\nStack: ${bgErr.stack}\n`, 'utf8');
-      } catch(e) {}
-      try {
         await db.run("DELETE FROM leads WHERE search_id = ?", [searchId]);
         await db.run("DELETE FROM searches WHERE id = ?", [searchId]);
         console.log(`[BACKGROUND SEARCH] Deleted failed search ID ${searchId} from database.`);
@@ -848,30 +823,6 @@ app.post('/api/search', async (req, res) => {
       }
     }
   })();
-});
-
-app.get('/api/debug-env', (req, res) => {
-  const fs = require('fs');
-  const path = require('path');
-  const checkEnv = (p) => {
-    try {
-      const fullPath = path.resolve(__dirname, p);
-      if (!fs.existsSync(fullPath)) return { error: fullPath + ' does not exist' };
-      const content = fs.readFileSync(fullPath, 'utf8');
-      const lines = content.split('\n');
-      const keys = lines.map(l => l.split('=')[0].trim()).filter(Boolean);
-      const pLine = lines.find(l => l.trim().startsWith('SEARCH_PROVIDER='));
-      const provider = pLine ? pLine.split('=')[1].trim() : 'bing';
-      return { keys, provider };
-    } catch(e) {
-      return { error: e.message };
-    }
-  };
-  res.json({
-    root: checkEnv('../.env'),
-    currentServer: checkEnv('../current/server/.env'),
-    localServer: checkEnv('.env')
-  });
 });
 
 app.delete('/api/searches/:id', async (req, res) => {
