@@ -311,6 +311,21 @@ function App() {
   const [isSavingSearch, setIsSavingSearch] = useState(false);
   const [saveSuccessMessage, setSaveSuccessMessage] = useState('');
   const [searchSummary, setSearchSummary] = useState(null);
+  const [versionInfo, setVersionInfo] = useState({ commit_hash: 'Loading...', build_time: 'Loading...' });
+
+  useEffect(() => {
+    fetch('/version.json')
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.commit_hash) {
+          setVersionInfo(data);
+        }
+      })
+      .catch(e => {
+        console.error("Failed to load version info:", e);
+        setVersionInfo({ commit_hash: 'Error loading version', build_time: 'Error loading version' });
+      });
+  }, []);
 
   const qualifiedLeads = useMemo(() => results.filter(l => l.category === 'qualified' || !l.category), [results]);
   
@@ -838,6 +853,27 @@ function App() {
 
       {activeTab === 'finder' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+          {/* Debug Banner */}
+          <div style={{
+            backgroundColor: '#ef4444',
+            color: '#ffffff',
+            padding: '1.25rem',
+            borderRadius: '8px',
+            fontWeight: 'bold',
+            fontSize: '0.95rem',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '0.4rem',
+            border: '2px solid #b91c1c',
+            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+          }}>
+            <div style={{ fontSize: '1.15rem', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>⚠️ Environment Debug Info</div>
+            <div><span style={{ opacity: 0.8 }}>Git Commit Hash:</span> <code style={{ backgroundColor: 'rgba(0,0,0,0.2)', padding: '0.1rem 0.3rem', borderRadius: '4px', fontFamily: 'monospace' }}>{versionInfo.commit_hash}</code></div>
+            <div><span style={{ opacity: 0.8 }}>Build Timestamp:</span> <code style={{ backgroundColor: 'rgba(0,0,0,0.2)', padding: '0.1rem 0.3rem', borderRadius: '4px', fontFamily: 'monospace' }}>{versionInfo.build_time}</code></div>
+            <div><span style={{ opacity: 0.8 }}>Backend API Base URL:</span> <code style={{ backgroundColor: 'rgba(0,0,0,0.2)', padding: '0.1rem 0.3rem', borderRadius: '4px', fontFamily: 'monospace' }}>{window.location.origin}/api</code></div>
+            <div><span style={{ opacity: 0.8 }}>Browser Hostname:</span> <code style={{ backgroundColor: 'rgba(0,0,0,0.2)', padding: '0.1rem 0.3rem', borderRadius: '4px', fontFamily: 'monospace' }}>{window.location.hostname}</code></div>
+          </div>
+
           {results.length > 0 && (
             <button
               onClick={() => {
